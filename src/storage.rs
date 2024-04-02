@@ -6,6 +6,7 @@ use crate::bytemap;
 
 pub struct Storage {
     bitmap: bytemap::BitMap,
+    
 }
 
 // struct Storage {

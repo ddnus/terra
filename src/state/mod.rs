@@ -5,9 +5,9 @@ use self::disk::Disk;
 mod disk;
 
 pub(crate) trait State {
-    fn set(&mut self, pos: u64, buf: &[u8]) -> Result<()>;
+    fn set(&mut self, pos: usize, buf: &[u8]) -> Result<()>;
 
-    fn get(&mut self, pos: u64, buf: &mut [u8]) -> Result<()>;
+    fn get(&mut self, pos: usize, buf: &mut [u8]) -> Result<()>;
 
     fn truncate(&mut self) ->Result<()>;
 
@@ -21,7 +21,7 @@ pub(crate) trait State {
 }
 
 pub struct MetaData {
-    pub size: u64,
+    pub size: usize,
 }
 
 pub fn new(path: &str) -> Box<dyn State> {

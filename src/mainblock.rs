@@ -1,13 +1,13 @@
 use crate::{datablock::DataBlock, state::State};
-use std::io::Result;
+use std::{cmp, io::Result};
 use byteorder::{BigEndian, ByteOrder};
 
-const MAIN_BlOCK_FILE_NAME: &str = "@mainblock";
-
+const MAIN_BLOCK_FILE_NAME: &str = "@mainblock";
+const HEADER_SIZE: usize = 17;
 
 pub struct MainBlock {
     path: String,
-    // header: BlockHeader,
+    
     state: Box<dyn State>,
     // 一次性读取数据量
     fetch_size: usize,
@@ -37,7 +37,7 @@ impl MainBlock {
     }
 
     pub fn new(path: &str, fetch_size: usize) -> Self {
-        let main_block_file = Self::get_file_path(path.to_string(), MAIN_BlOCK_FILE_NAME);
+        let main_block_file = Self::get_file_path(path.to_string(), MAIN_BLOCK_FILE_NAME);
         MainBlock {
             path: path.to_string(),
             state: crate::state::new(&main_block_file),
@@ -46,36 +46,94 @@ impl MainBlock {
         }
     }
 
-    pub fn get(&mut self, pos: u64) -> Result<Block> {
+    fn get_header(&mut self, index: usize) -> Result<Header> {
         let mut buf = vec![0u8; self.fetch_size];
         
-        self.state.get(pos, &mut buf)?;
+        self.state.get(self.get_real_pos(index), &mut buf)?;
 
-        let header = self.get_header(&buf);
+        let header = self.cast_to_header(&buf);
 
-        let mut block = Block{
-            header: header,
-            data: buf[17..].to_vec(),
-        };
-
-        // 溢出情况，需要去数据块取
-        if block.header.flag > 0 && block.header.size > 0 {
-            
-        }
-
-        Ok(block)
-        
+        Ok(header)
     }
 
-    fn get_header(&self, buf: &Vec<u8>) -> Header {
-        Header{
+    fn get_real_pos(&self, index: usize) -> usize {
+        self.fetch_size * index
+    }
+
+    pub fn get(&mut self, index: usize) -> Result<Vec<u8>> {
+
+        let mut buf = vec![0u8; self.fetch_size];
+
+        self.state.get(self.get_real_pos(index), &mut buf)?;
+
+        let header = self.cast_to_header(&buf);
+
+        let mut main_data: Vec<u8> = buf[HEADER_SIZE..].to_vec();
+
+        // 溢出情况，需要去数据块取
+        if header.flag > 0 && header.size as usize > (self.fetch_size - HEADER_SIZE) {
+            let remain_size = header.size as usize + HEADER_SIZE - self.fetch_size;
+            let datablock = self.datablock.get(header.pos as usize, remain_size);
+            match datablock {
+                Ok(data) => main_data.extend(&data),
+                Err(_) => {},
+            }
+        } else {
+            let real_size = cmp::min(self.fetch_size, header.size as usize + HEADER_SIZE);
+            main_data = buf[HEADER_SIZE..real_size].to_vec();
+        }
+
+        Ok(main_data)
+    }
+
+    pub fn set(&mut self, index: usize, buf: &Vec<u8>) -> Result<()> {
+
+        let mut header = self.get_header(index)?;
+        
+        // 释放datablock旧空间, 下面会重新分配空间
+        if header.flag == 1 {
+            self.datablock.free(header.pos as usize, header.size as usize + HEADER_SIZE - self.fetch_size)?;
+        }
+
+        let mut main_buf_data: Vec<u8> = vec![];
+        header.flag = 0;
+        let size = buf.len();
+        if size > self.fetch_size - HEADER_SIZE {
+            // main buf中要存的数据长度
+            let main_buf_data_size = self.fetch_size-HEADER_SIZE;
+            header.flag = 1;
+            header.pos = self.datablock.set(&buf[main_buf_data_size..].to_vec())? as u64;
+            main_buf_data = buf[..main_buf_data_size].to_vec();
+        } else {
+            main_buf_data = buf.clone();
+        }
+
+        header.size = size as u64;
+
+        let mut block = self.cast_header_to_buf(&header);
+        block.append(&mut main_buf_data);
+
+        // 保存header信息
+        self.state.set(self.get_real_pos(index), &block)?;
+
+        Ok(())
+    }
+
+    pub fn truncate(&mut self) -> Result<()> {
+        self.datablock.truncate()?;
+        self.state.truncate()?;
+        Ok(())
+    }
+
+    fn cast_to_header(&self, buf: &Vec<u8>) -> Header {
+        Header {
             flag: buf[0],
             size: BigEndian::read_u64(&buf[1..9]),
             pos: BigEndian::read_u64(&buf[9..17]),
         }
     }
 
-    fn change_header_to_buf(&self, header: &Header) -> Vec<u8> {
+    fn cast_header_to_buf(&self, header: &Header) -> Vec<u8> {
         let mut header_buf = vec![header.flag];
         let mut size_buf = [0u8; 8];
         let mut pos_buf = [0u8; 8];
@@ -88,6 +146,41 @@ impl MainBlock {
 
         header_buf
     }
-
     
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_and_set() {
+        let mut mb = MainBlock::new("/tmp/", 1024);
+        let _ = mb.truncate();
+
+        let list: Vec<(u8, usize, usize)> = vec![
+            (3, 1024, 0),
+            (1, 103, 1),
+            (2, 1007, 2),
+            (3, 1008, 3),
+            (1, 2048, 5),
+            (6, 6048, 4),
+        ];
+
+        for item in list {
+            let set_buf = vec![item.0; item.1];
+            match mb.set(item.2, &set_buf) {
+                Ok(()) => {
+                    if let Ok(get_buf) = mb.get(item.2) {
+                        assert_eq!(get_buf, set_buf);
+                    } else {
+                        assert!(false);
+                    }
+                },
+                _ => assert!(false),
+            }
+        }
+
+    }
+
 }

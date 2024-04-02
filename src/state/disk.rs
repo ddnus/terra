@@ -26,15 +26,15 @@ impl Disk {
     }
 }
 impl State for Disk  {
-    fn set(&mut self, pos: u64, buf: &[u8]) -> Result<()> {
-        self.handle.seek(SeekFrom::Start(pos))?;
+    fn set(&mut self, pos: usize, buf: &[u8]) -> Result<()> {
+        self.handle.seek(SeekFrom::Start(pos as u64))?;
         self.handle.write_all(buf)?;
         Ok(())
     }
 
-    fn get(&mut self, pos: u64, buf: &mut [u8]) -> Result<()> {
-        self.handle.seek(SeekFrom::Start(pos))?;
-        self.handle.read_exact(buf)?;
+    fn get(&mut self, pos: usize, buf: &mut [u8]) -> Result<()> {
+        self.handle.seek(SeekFrom::Start(pos as u64))?;
+        self.handle.read(buf)?;
         Ok(())
     }
 
@@ -58,7 +58,7 @@ impl State for Disk  {
     fn meta(&self) -> Result<MetaData> {
         let metadata = self.handle.metadata();
         Ok(MetaData{
-            size: metadata.unwrap().size(),
+            size: metadata.unwrap().size() as usize,
         })
     }
 
@@ -89,6 +89,10 @@ mod tests {
     #[test]
     fn test_get() {
         let mut disk = Disk::new("/tmp/wtfs_disk_test_get");
+
+        let mut read_buf = [0u8; 10];
+        let _ = disk.get(0, &mut read_buf);
+        assert_eq!(read_buf, [0u8; 10]);
 
         let buffer = [2u8; 10];
         let _ = disk.set(100, &buffer);
