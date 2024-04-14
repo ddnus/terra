@@ -1,4 +1,4 @@
-use crate::{datablock::DataBlock, state::State};
+use crate::storage::{common, datablock::DataBlock, state::{self, State}};
 use std::{cmp, io::Result};
 use byteorder::{BigEndian, ByteOrder};
 
@@ -37,10 +37,10 @@ impl MainBlock {
     }
 
     pub fn new(path: &str, fetch_size: usize) -> Self {
-        let main_block_file = Self::get_file_path(path.to_string(), MAIN_BLOCK_FILE_NAME);
+        let main_block_file = common::build_path(path, MAIN_BLOCK_FILE_NAME);
         MainBlock {
             path: path.to_string(),
-            state: crate::state::new(&main_block_file),
+            state: state::new(&main_block_file),
             fetch_size: fetch_size,
             datablock: DataBlock::new(path, 1024),
         }
@@ -66,6 +66,10 @@ impl MainBlock {
 
         self.state.get(self.get_real_pos(index), &mut buf)?;
 
+        if buf.len() == 0 {
+            return Ok(vec![]);
+        }
+
         let header = self.cast_to_header(&buf);
 
         let mut main_data: Vec<u8> = buf[HEADER_SIZE..].to_vec();
@@ -89,26 +93,33 @@ impl MainBlock {
     pub fn set(&mut self, index: usize, buf: &Vec<u8>) -> Result<()> {
 
         let mut header = self.get_header(index)?;
-        
-        // 释放datablock旧空间, 下面会重新分配空间
-        if header.flag == 1 {
-            self.datablock.free(header.pos as usize, header.size as usize + HEADER_SIZE - self.fetch_size)?;
-        }
 
-        let mut main_buf_data: Vec<u8> = vec![];
         header.flag = 0;
-        let size = buf.len();
-        if size > self.fetch_size - HEADER_SIZE {
-            // main buf中要存的数据长度
-            let main_buf_data_size = self.fetch_size-HEADER_SIZE;
-            header.flag = 1;
-            header.pos = self.datablock.set(&buf[main_buf_data_size..].to_vec())? as u64;
-            main_buf_data = buf[..main_buf_data_size].to_vec();
+
+        let total_buf_size = buf.len();
+        let main_buf_size = cmp::min(self.fetch_size - HEADER_SIZE, total_buf_size);
+
+        let mut main_buf_data = buf[..main_buf_size].to_vec();
+
+        // 修改和新增
+        if header.flag == 1 {
+            let old_data_buf_size = header.size as usize + HEADER_SIZE - self.fetch_size;
+            // data buf中要存储的数据
+            if total_buf_size > main_buf_size {
+                header.flag = 1;
+                header.pos = self.datablock.update(header.pos as usize, old_data_buf_size, &buf[main_buf_size..].to_vec())? as u64;
+            } else {
+                self.datablock.free(header.pos as usize, old_data_buf_size)?;
+            }
         } else {
-            main_buf_data = buf.clone();
+            // data buf中要存储的数据
+            if total_buf_size > main_buf_size {
+                header.flag = 1;
+                header.pos = self.datablock.set(&buf[main_buf_size..].to_vec())? as u64;
+            }
         }
 
-        header.size = size as u64;
+        header.size = total_buf_size as u64;
 
         let mut block = self.cast_header_to_buf(&header);
         block.append(&mut main_buf_data);
@@ -154,8 +165,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_get() {
+        let mut mb = MainBlock::new("/tmp/wtfs/tests/mainblock1", 1024);
+        let _ = mb.truncate();
+        let get_buf = mb.get(100);
+        assert!(get_buf.is_ok());
+        assert!(get_buf.unwrap().is_empty());
+    }
+
+    #[test]
     fn test_get_and_set() {
-        let mut mb = MainBlock::new("/tmp/", 1024);
+        let mut mb = MainBlock::new("/tmp/wtfs/tests/mainblock2", 1024);
         let _ = mb.truncate();
 
         let list: Vec<(u8, usize, usize)> = vec![

@@ -678,6 +678,7 @@ dependencies = [
  "byteorder",
  "criterion",
  "rand",
+ "serde",
 ]
 
 [[package]]

@@ -32,10 +32,10 @@ impl State for Disk  {
         Ok(())
     }
 
-    fn get(&mut self, pos: usize, buf: &mut [u8]) -> Result<()> {
+    fn get(&mut self, pos: usize, buf: &mut [u8]) -> Result<usize> {
         self.handle.seek(SeekFrom::Start(pos as u64))?;
-        self.handle.read(buf)?;
-        Ok(())
+        let n = self.handle.read(buf)?;
+        Ok(n)
     }
 
     fn truncate(&mut self) ->Result<()> {

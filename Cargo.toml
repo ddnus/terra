@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 byteorder = "1.4.3"
 bincode = "1.3.3"
+serde = "1.0.197"
 
 [[bin]]
 name = "wtfs"

@@ -1,9 +1,8 @@
 use std::path::Path;
 use std::io::Result;
 
-use crate::{bytemap::BitMap, state::State};
+use crate::storage::{bytemap::BitMap, common, state::{self, State}};
 
-const BITMAP_FILE_NAME: &str = "@bitmap";
 const DATA_BLOCK_FILE_NAME: &str = "@datablock";
 
 pub struct DataBlock {
@@ -18,21 +17,18 @@ pub struct DataBlock {
 
 impl DataBlock {
     pub fn new(path: &str, block_size: usize) -> Self {
-        let binding = Path::new(path).join(DATA_BLOCK_FILE_NAME);
-        let datablock_path = binding.to_str().unwrap();
-        let binding = Path::new(path).join(BITMAP_FILE_NAME);
-        let bytemap_path = binding.to_str().unwrap();
+        let datablock_path = common::build_path(path, DATA_BLOCK_FILE_NAME);
 
         DataBlock {
-            state: crate::state::new(datablock_path),
-            bitmap: BitMap::new(bytemap_path),
+            state: state::new(datablock_path.as_str()),
+            bitmap: BitMap::new(path),
             block_size: block_size,
         }
     }
 
-    pub fn get(&mut self, pos: usize, size: usize) -> Result<Vec<u8>> {
+    pub fn get(&mut self, index: usize, size: usize) -> Result<Vec<u8>> {
         let mut buf = vec![0u8; size as usize];
-        let pos = pos * self.block_size;
+        let pos = index * self.block_size;
         self.state.get(pos, &mut buf)?;
         Ok(buf)
     }
@@ -49,16 +45,33 @@ impl DataBlock {
         Ok(index)
     }
 
-    pub fn free(&mut self, pos: usize, size: usize) -> Result<()> {
+    pub fn free(&mut self, index: usize, size: usize) -> Result<()> {
         let block_nums = (size + self.block_size - 1) / self.block_size;
-        self.bitmap.free(pos, block_nums)?;
+        self.bitmap.free(index, block_nums)?;
         Ok(())
     }
 
     pub fn truncate(&mut self) ->Result<()> {
         self.state.truncate()?;
-        self.bitmap.reset()?;
+        self.bitmap.truncate()?;
         Ok(())
+    }
+
+    pub fn update(&mut self, index: usize, old_size: usize, new_buf: &Vec<u8>) -> Result<usize> {
+        // 判断是否需要重新分配空间
+        let new_size = new_buf.len();
+        let block_nums = (new_size + self.block_size - 1) / self.block_size;
+        let old_block_nums = (old_size + self.block_size - 1) / self.block_size;
+
+        let mut index = index;
+        if block_nums != old_block_nums {
+            self.free(index, old_size)?;
+            index = self.bitmap.malloc(block_nums);
+        }
+
+        self.state.set(index * self.block_size, new_buf)?;
+
+        Ok(index)
     }
 
 }
@@ -69,7 +82,7 @@ mod tests {
 
     #[test]
     fn test_get() {
-        let mut db = DataBlock::new("/tmp/", 1024);
+        let mut db = DataBlock::new("/tmp/wtfs/tests/datablock1", 1024);
         let _ = db.truncate();
 
         let list: Vec<(u8, usize, usize)> = vec![
@@ -99,7 +112,7 @@ mod tests {
 
     #[test]
     fn test_free() {
-        let mut db = DataBlock::new("/tmp/", 1024);
+        let mut db = DataBlock::new("/tmp/wtfs/tests/datablock2", 1024);
         let _ = db.truncate();
 
         let list: Vec<(bool, usize, usize)> = vec![
@@ -110,7 +123,7 @@ mod tests {
             ];
 
         for item in list {
-            let set_buf = vec![0u8; item.1];
+            let set_buf = vec![1u8; item.1];
             match db.set(&set_buf) {
                 Ok(set_pos) => {
 

@@ -1,9 +1,14 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+
+pub trait HashEngin {
+    // fn get()
+}
+
 #[drive(Debug)]
 pub struct HashIndex {
-
+    // engine: Mutex<>
 }
 
 impl HashIndex {
@@ -25,6 +30,10 @@ impl HashIndex {
         index as usize
     }
 
-    // pub fn 
+    // pub fn set(key: &K, value: V) {
+    //     let index = Self::calculate_index(key, capacity);
+    //     self.array[index] = Some(value);
+    // }
+
 }
 

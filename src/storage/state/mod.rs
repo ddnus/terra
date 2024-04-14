@@ -7,7 +7,7 @@ mod disk;
 pub(crate) trait State {
     fn set(&mut self, pos: usize, buf: &[u8]) -> Result<()>;
 
-    fn get(&mut self, pos: usize, buf: &mut [u8]) -> Result<()>;
+    fn get(&mut self, pos: usize, buf: &mut [u8]) -> Result<usize>;
 
     fn truncate(&mut self) ->Result<()>;
 

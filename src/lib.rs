@@ -1,7 +1,6 @@
 
 mod config;
-pub mod bytemap;
-mod state;
-pub mod mainblock;
-mod datablock;
-mod storage;
+pub mod storage;
+mod wal;
+mod bufpool;
+mod hash;
