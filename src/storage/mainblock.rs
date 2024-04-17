@@ -90,7 +90,7 @@ impl MainBlock {
         Ok(main_data)
     }
 
-    pub fn set(&mut self, index: usize, buf: &Vec<u8>) -> Result<()> {
+    pub fn set(&mut self, index: usize, buf: &Vec<u8>) -> Result<bool> {
 
         let mut header = self.get_header(index)?;
 
@@ -127,7 +127,7 @@ impl MainBlock {
         // 保存header信息
         self.state.set(self.get_real_pos(index), &block)?;
 
-        Ok(())
+        Ok(true)
     }
 
     pub fn truncate(&mut self) -> Result<()> {
@@ -190,7 +190,7 @@ mod tests {
         for item in list {
             let set_buf = vec![item.0; item.1];
             match mb.set(item.2, &set_buf) {
-                Ok(()) => {
+                Ok(_) => {
                     if let Ok(get_buf) = mb.get(item.2) {
                         assert_eq!(get_buf, set_buf);
                     } else {
