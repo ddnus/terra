@@ -1,6 +1,5 @@
 use crate::storage::{common, state::{self, State}};
 use std::{collections::BTreeMap, io::Result, str};
-use serde::Deserialize;
 
 const BITMAP_FILE_NAME: &str = "@bitmap";
 
@@ -10,7 +9,7 @@ pub struct BitMap {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct BlockMeta {
     bits: Vec<u8>,
     idles: BTreeMap<usize, usize>,

@@ -515,6 +515,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "terradb"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "byteorder",
+ "criterion",
+ "rand",
+ "serde",
+]
+
+[[package]]
 name = "tinytemplate"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
