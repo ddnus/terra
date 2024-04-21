@@ -1,18 +1,16 @@
 [package]
-name = "terradb"
+name = "mineral"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 byteorder = "1.4.3"
 bincode = "1.3.3"
 serde = "1.0.197"
-
-[[bin]]
-name = "wtfs"
-path = "src/bin/main.rs"
+crc32fast = "1.2.1"
+thiserror = "1.0"
+glob = "0.3.1"
+flate2 = "1.0.28"
 
 [dev-dependencies]
 criterion = "0.5.1"
@@ -21,3 +19,7 @@ rand = { version = "0.9.0-alpha.1" }
 [[bench]]
 name = "mainblock_benchmark"
 harness = false
+
+[[bin]]
+name = "mineral"
+path = "src/bin/main.rs"

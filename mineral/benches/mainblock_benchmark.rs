@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use wtfs::storage::mainblock::MainBlock;
+use mineral::storage::mainblock::MainBlock;
 use rand::Rng;
 
 fn criterion_benchmark(c: &mut Criterion) {

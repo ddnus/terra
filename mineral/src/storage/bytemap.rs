@@ -1,5 +1,5 @@
-use crate::storage::{common, state::{self, State}};
 use std::{collections::BTreeMap, io::Result, str};
+use crate::state::{self, State};
 
 const BITMAP_FILE_NAME: &str = "@bitmap";
 
@@ -210,7 +210,7 @@ impl BlockMeta {
 impl BitMap {
     // 创建一个新的位图，所有位都初始化为0，0位表示空闲，1位表示占用
     pub fn new(path: &str) -> Self {
-        let bytemap_path = common::build_path(path, BITMAP_FILE_NAME);
+        let bytemap_path = state::build_path(path, BITMAP_FILE_NAME);
         let mut stat = state::new(&bytemap_path);
         let sz = stat.meta().unwrap().size;
         let mut bites = vec![];

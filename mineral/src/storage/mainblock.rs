@@ -1,4 +1,5 @@
-use crate::storage::{common, datablock::DataBlock, state::{self, State}};
+use crate::storage::{datablock::DataBlock};
+use crate::state::{self, State};
 use std::{cmp, io::Result};
 use byteorder::{BigEndian, ByteOrder};
 
@@ -28,16 +29,8 @@ pub struct Header {
 
 impl MainBlock {
 
-    pub fn get_file_path(path: String, name: &str) -> String {
-        if path.ends_with("/") {
-            path + name
-        } else {
-            path + "/" + name
-        }
-    }
-
     pub fn new(path: &str, fetch_size: usize) -> Self {
-        let main_block_file = common::build_path(path, MAIN_BLOCK_FILE_NAME);
+        let main_block_file = state::build_path(path, MAIN_BLOCK_FILE_NAME);
         MainBlock {
             path: path.to_string(),
             state: state::new(&main_block_file),

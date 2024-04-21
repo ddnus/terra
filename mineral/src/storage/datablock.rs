@@ -1,7 +1,8 @@
 use std::path::Path;
 use std::io::Result;
 
-use crate::storage::{bytemap::BitMap, common, state::{self, State}};
+use crate::storage::{bytemap::BitMap};
+use crate::state::{self, State};
 
 const DATA_BLOCK_FILE_NAME: &str = "@datablock";
 
@@ -17,7 +18,7 @@ pub struct DataBlock {
 
 impl DataBlock {
     pub fn new(path: &str, block_size: usize) -> Self {
-        let datablock_path = common::build_path(path, DATA_BLOCK_FILE_NAME);
+        let datablock_path = state::build_path(path, DATA_BLOCK_FILE_NAME);
 
         DataBlock {
             state: state::new(datablock_path.as_str()),

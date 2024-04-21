@@ -3,9 +3,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::prelude::*;
 use std::io::SeekFrom;
 use std::io::Result;
-#[cfg(target_os = "linux")]
+#[cfg(target_family = "unix")]
 use std::os::unix::fs::MetadataExt;
-#[cfg(target_os = "windows")]
+#[cfg(target_family = "windows")]
 use std::os::windows::fs::MetadataExt;
 
 use super::{MetaData, State};
@@ -60,9 +60,9 @@ impl State for Disk  {
 
     fn meta(&self) -> Result<MetaData> {
         let metadata = self.handle.metadata();
-        #[cfg(target_os = "windows")]
+        #[cfg(target_family = "windows")]
         let file_size = metadata.unwrap().file_size();
-        #[cfg(target_os = "linux")]
+        #[cfg(target_family = "unix")]
         let file_size = metadata.unwrap().size();
         
         Ok(MetaData{

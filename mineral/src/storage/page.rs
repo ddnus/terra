@@ -1,9 +1,11 @@
 use std::sync::{Arc, Mutex};
 use std::{io::Result, vec};
 use std::cmp;
+use crate::cvt;
 use byteorder::{BigEndian, ByteOrder};
 
-use crate::storage::{common, mainblock::MainBlock, state::{self, State}};
+use crate::storage::{mainblock::MainBlock};
+use crate::state::{self, State};
 
 pub struct Header {
     flag: u8,   // 标识位
@@ -47,13 +49,13 @@ impl Page {
     fn cast_to_header(&self, buf: &Vec<u8>) -> Header {
         Header {
             flag: buf[0],
-            size: common::case_buf_to_u64(&buf[1..9].to_vec()),
+            size: cvt::case_buf_to_u64(&buf[1..9].to_vec()),
         }
     }
 
     fn cast_header_to_buf(&self, flag: u8, size: usize) -> Vec<u8> {
         let mut header_buf = vec![flag];
-        let mut size_buf = common::case_u64_to_buf(size as u64);
+        let mut size_buf = cvt::case_u64_to_buf(size as u64);
 
         header_buf.extend_from_slice(&size_buf);
 
@@ -62,7 +64,7 @@ impl Page {
 
     fn set(&mut self, index: usize, buf: Vec<u8>) {
 
-        let index_buf = common::case_u64_to_buf(index as u64);
+        let index_buf = cvt::case_u64_to_buf(index as u64);
 
         let mut buf = buf;
         buf.extend(index_buf);
@@ -102,7 +104,7 @@ impl Page {
     fn handle_buf(&mut self, buf: &Vec<u8>) -> Vec<u8> {
         let flag = buf[0];
         if flag == 255 {
-            let size = common::case_buf_to_u64(&buf[1..9].to_vec()) as usize;
+            let size = cvt::case_buf_to_u64(&buf[1..9].to_vec()) as usize;
             let buf_data_len = buf.len() - 9;
             if size > buf_data_len {
                 return buf.clone();
@@ -132,7 +134,7 @@ impl Page {
     fn flush(&mut self) {
         for buf in self.buffer.clone() {
             let buf_len = buf.len();
-            let index = common::case_buf_to_u64(&buf[buf_len - 9..].to_vec());
+            let index = cvt::case_buf_to_u64(&buf[buf_len - 9..].to_vec());
             self.mainblock.lock().unwrap().set(index as usize, &buf[..buf_len - 9].to_vec());
         }
     }

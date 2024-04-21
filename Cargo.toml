@@ -1,6 +1,6 @@
-workspace = { members = ["terradb"] }
+workspace = { members = [ "mineral", "p2p"] }
 [package]
-name = "wtfs"
+name = "terra"
 version = "0.1.0"
 edition = "2021"
 
@@ -13,13 +13,9 @@ serde = "1.0.197"
 lru = "0.12.3"
 
 [[bin]]
-name = "wtfs"
+name = "terra"
 path = "src/bin/main.rs"
 
 [dev-dependencies]
 criterion = "0.5.1"
 rand = { version = "0.9.0-alpha.1" }
-
-[[bench]]
-name = "mainblock_benchmark"
-harness = false
