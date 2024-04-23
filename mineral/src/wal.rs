@@ -147,23 +147,23 @@ impl Wal {
 
     pub fn new(path: &str) -> Self {
 
-        let mut log_version_list = Self::get_log_versions(path);
+        let log_version_list = Self::get_log_versions(path);
 
-        let wlog = Wlog::new(path, log_version_list[log_version_list.len() - 1]);
+        let mut wlog = Wlog::new(path, log_version_list[log_version_list.len() - 1]);
+
+        let version =  Wal::init_version(path, &log_version_list, &mut wlog).unwrap();
         
-        let mut wal = Wal {
+        let wal = Wal {
             path: path.to_string(),
-            seq: 0,
+            seq: version,
 
             wlock: Mutex::new(0),
             max_size: 4294967295,
 
             wlog,
 
-            log_version_list: log_version_list,
+            log_version_list,
         };
-
-        wal.init_version();
 
         wal
     }
@@ -177,39 +177,21 @@ impl Wal {
         flate_buf.extend_from_slice(&cvt::case_u64_to_buf(self.seq));
 
         let mut data_len = flate_buf.len();
-        if data_len + self.active_size as usize > self.max_size as usize {
+        if data_len + self.wlog.file_size as usize > self.max_size as usize {
             self.rotation_log();
         }
 
-
-
-        Err(Error::AppendWalDataFailed)
+        self.wlog.append(&flate_buf)
     }
 
     fn rotation_log(&mut self) {
         // 如果文件不存在
-        let new_index = self.get_new_log_index(self.seq);
         self.log_version_list.push(self.seq);
+
+        self.wlog.close();
         
-        self.seq = new_index;
+        self.wlog = Wlog::new(&self.path, self.seq);
 
-        self.init_log_state();
-
-    }
-
-    fn get_new_log_index(&self, index: u64) -> u64 {
-        let new_index = index.wrapping_add(1);
-        if self.log_version_list.contains(&new_index) {
-            return self.get_new_log_index(new_index);
-        }
-        return new_index;
-    }
-
-    fn init_log_state(&mut self) {
-        let log_file = self.build_log_name(self.seq);
-        let state_handle = state::new(&log_file);
-        self.state = Some(state::new(&log_file));
-        self.active_size = state_handle.meta().unwrap().size as u32;
     }
 
     fn build_log_name<T: Display>(&self, index: T) -> String {
@@ -249,25 +231,21 @@ impl Wal {
         list
     }
 
-    fn init_version(log_version_list: Vec<u64>, active_wal: &Wlog) {
+    fn init_version(path: &str, log_version_list: &Vec<u64>, active_wlog: &mut Wlog) -> Result<u64, Error> {
         let length = log_version_list.len();
-        let mut latest_log =  log_version_list[length - 1];
         
         if length > 1 {
-            if active_wal.file_size == 0 {
-                latest_log = log_version_list[length - 2];
+            if active_wlog.file_size == 0 {
+                let latest_log = log_version_list[length - 2];
+                return Wlog::new(path, latest_log).get_latest_version();
             }
         } else if length == 1 {
-            if active_wal.file_size == 0 {
-                return;
+            if active_wlog.file_size == 0 {
+                return Ok(0);
             }
-        } else {
-            return;
         }
 
-        if let Ok(version) = active_wal.get_latest_version() {
-            
-        }
+        return active_wlog.get_latest_version();
     }
 
 }
@@ -290,6 +268,10 @@ impl Wlog {
             page_size: 32768,   // 32kb
             file_size: 0
         }
+    }
+
+    pub fn close(&mut self) {
+
     }
 
     pub fn append(&mut self, buf: &Vec<u8>) -> Result<(), Error> {
@@ -417,7 +399,7 @@ impl Wlog {
 
     }
 
-    fn get_latest_version(&self) -> Result<u64, Error> {
+    fn get_latest_version(&mut self) -> Result<u64, Error> {
         let mut version_buf = [0u8; 8];
         if let Ok(size) = self.state.get_from_end(-8, &mut version_buf) {
             if size == 8 {
