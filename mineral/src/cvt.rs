@@ -19,3 +19,13 @@ pub fn case_u32_to_buf(index: u32) -> Vec<u8> {
     BigEndian::write_u32(&mut size_buf, index);
     size_buf
 }
+
+pub fn case_buf_to_u16(buf: &Vec<u8>) -> u16 {
+    BigEndian::read_u16(buf)
+}
+
+pub fn case_u16_to_buf(index: u16) -> Vec<u8> {
+    let mut size_buf = vec![0u8; 8];
+    BigEndian::write_u16(&mut size_buf, index);
+    size_buf
+}
