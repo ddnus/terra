@@ -6,6 +6,7 @@ use crate::error::Error;
 use crate::state::{self, State};
 use std::fmt::Display;
 use std::sync::Mutex;
+use std::time::SystemTime;
 use std::vec;
 
 // 操作标识
@@ -31,11 +32,11 @@ pub struct Payload {
     op: u8,
     offset: u32,
     data: Vec<u8>,
-    version: u32,
+    version: u64,
 }
 
 impl Payload {
-    fn new(op: u8, offset: u32, data: &Vec<u8>, version: u32) -> Self {
+    fn new(op: u8, offset: u32, data: &Vec<u8>, version: u64) -> Self {
         Payload {
             op,
             offset,
@@ -121,8 +122,8 @@ impl Entry {
     }
 
     fn to_header_buf(&self) -> Vec<u8> {
-        let mut buf = cvt::case_u32_to_buf(self.header.crc32);
-        buf.extend_from_slice(&cvt::case_u16_to_buf(self.header.dlen));
+        let mut buf = self.header.crc32.to_be_bytes().to_vec();
+        buf.extend_from_slice(&self.header.dlen.to_be_bytes());
         buf.push(self.header.stype);
         buf
     }
@@ -136,7 +137,9 @@ pub struct Wal {
     path: String,
 
     wlock: Mutex<u8>,
-    max_size: u32,
+    file_max_size: u32,
+    rotation_live_time: u64,
+    rotation_time: SystemTime,
 
     wlog: Wlog,
 
@@ -158,7 +161,9 @@ impl Wal {
             seq: version,
 
             wlock: Mutex::new(0),
-            max_size: 4294967295,
+            file_max_size: 4294967295,
+            rotation_live_time: 1800,   // 30min
+            rotation_time: SystemTime::now(),   // 30min
 
             wlog,
 
@@ -169,28 +174,30 @@ impl Wal {
     }
 
     pub fn append(&mut self, buf: &Vec<u8>) -> Result<(), Error> {
-        let mut flate_buf = flate::compress_data(buf);
+        let mut flate_buf = buf.clone();
         self.wlock.lock();
 
         self.seq += 1;
 
         flate_buf.extend_from_slice(&cvt::case_u64_to_buf(self.seq));
 
-        let mut data_len = flate_buf.len();
-        if data_len + self.wlog.file_size as usize > self.max_size as usize {
-            self.rotation_log();
-        }
+        self.rotation_log(flate_buf.len());
 
         self.wlog.append(&flate_buf)
     }
 
-    fn rotation_log(&mut self) {
-        // 如果文件不存在
-        self.log_version_list.push(self.seq);
+    fn rotation_log(&mut self, buf_len: usize) {
 
-        self.wlog.close();
-        
-        self.wlog = Wlog::new(&self.path, self.seq);
+        if buf_len + self.wlog.file_size as usize > self.file_max_size as usize  || 
+            (self.rotation_live_time > 0 &&
+            SystemTime::now().duration_since(self.rotation_time).unwrap().as_secs() > self.rotation_live_time) {
+
+            self.log_version_list.push(self.seq);
+
+            self.wlog.close();
+            
+            self.wlog = Wlog::new(&self.path, self.seq);
+        }
 
     }
 
@@ -248,6 +255,41 @@ impl Wal {
         return active_wlog.get_latest_version();
     }
 
+    fn read_range(&mut self, min_version: u64, f: fn(buf: Vec<u8>, version: u64)) {
+        if self.wlog.version == min_version {
+            self.wlog.read_all(f);
+        } else {
+            for item in self.log_version_list.clone() {
+                if item < min_version {
+                    continue;
+                }
+                let mut wlog = Wlog::new(&self.path, item);
+                wlog.read_all(f);
+            }
+        }
+    }
+
+    fn truncate_all(&mut self) {
+        for version in self.log_version_list.clone() {
+            if self.wlog.version == version {
+                self.wlog.delete();
+            } else {
+                Wlog::new(&self.path, version).delete();
+            }
+        }
+
+        let new_wal = Self::new(&self.path);
+
+        self.path = new_wal.path;
+        self.seq = new_wal.seq;
+        self.wlock = new_wal.wlock;
+        self.file_max_size = new_wal.file_max_size;
+        self.rotation_live_time = new_wal.rotation_live_time;
+        self.rotation_time = new_wal.rotation_time;
+        self.wlog = new_wal.wlog;
+        self.log_version_list = new_wal.log_version_list;
+    }
+
 }
 
 struct Wlog {
@@ -262,16 +304,16 @@ impl Wlog {
         
         let log_file = state::build_path(path, &format!("{}-{}", WAL_NAME, seq));
         let state_handle = state::new(&log_file);
+        let size = state_handle.meta().unwrap().size as u32;
         Self {
             state: state_handle,
             version: seq,
             page_size: 32768,   // 32kb
-            file_size: 0
+            file_size: size,
         }
     }
 
     pub fn close(&mut self) {
-
     }
 
     pub fn append(&mut self, buf: &Vec<u8>) -> Result<(), Error> {
@@ -298,7 +340,6 @@ impl Wlog {
                 }
 
                 let entry_buf = Entry::new(stype, &flate_buf).encode();
-                
                 entry_bufs.extend_from_slice(&entry_buf);
 
                 active_size += data_len as u32;
@@ -333,7 +374,7 @@ impl Wlog {
         Err(Error::AppendWalDataFailed)
     }
 
-    pub fn read_all(&mut self, f: fn(buf: Vec<u8>)) {
+    pub fn read_all(&mut self, f: fn(buf: Vec<u8>, version: u64)) {
         let mut pos = 0;
         let mut left_buf: Vec<u8> = vec![]; 
         loop {
@@ -358,7 +399,7 @@ impl Wlog {
         }
     }
 
-    fn handle_page(&mut self, page_buf: &mut Vec<u8>, f: fn(buf: Vec<u8>)) {
+    fn handle_page(&mut self, page_buf: &mut Vec<u8>, f: fn(buf: Vec<u8>, version: u64)) {
         
         let mut remain_buf: Vec<u8> = page_buf.clone();
 
@@ -389,7 +430,9 @@ impl Wlog {
 
                 page_buf.drain(..page_chunk_size);
 
-                f(chunk_datas);
+                let version_pos = chunk_datas.len()-8;
+
+                f(chunk_datas[..version_pos].to_vec(), cvt::case_buf_to_u64(&chunk_datas[version_pos..].to_vec()));
 
                 chunk_datas = vec![];
 
@@ -413,6 +456,10 @@ impl Wlog {
 
     }
 
+    fn delete(&mut self) {
+        self.state.remove();
+    }
+
 }
 
 
@@ -421,18 +468,23 @@ mod tests {
     use super::*;
 
     fn tmp_bitmap_path(path: &str) -> String {
-        std::env::temp_dir().to_str().unwrap().to_string() + "/terra/tests/" + path
+        #[cfg(target_family = "unix")]
+        return "/tmp/terra/tests/".to_string() + path;
+        #[cfg(target_family = "windows")]
+        return std::env::temp_dir().to_str().unwrap().to_string() + "/terra/tests/" + path;
     }
 
     #[test]
     fn test_add() {
-        let mut wlog = Wal::new(&tmp_bitmap_path("wal"));
-        let app_result = wlog.append(&vec![3u8; 20]);
+        let mut wal = Wal::new(&tmp_bitmap_path("wal"));
+        wal.truncate_all();
+        let app_result = wal.append(&vec![3u8; 20]);
         assert!(app_result.is_ok());
 
-        // let _ = wlog.read_all(|data| {
-        //     print!("================data================: {:?}", data);
-        //     assert_eq!(data, vec![3u8; 10]);
-        // });
+        wal.read_range(0, |buf, version| {
+            assert_eq!(buf, vec![3u8; 20]);
+            assert_eq!(version, 1);
+        })
+
     }
 }
