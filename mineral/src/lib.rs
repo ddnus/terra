@@ -6,3 +6,4 @@ mod config;
 mod types;
 mod cvt;
 mod flate;
+mod pagebuf;

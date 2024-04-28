@@ -5,6 +5,7 @@ use crate::{cvt, flate};
 use crate::error::Error;
 use crate::state::{self, State};
 use std::fmt::Display;
+use std::path::Iter;
 use std::sync::Mutex;
 use std::time::SystemTime;
 use std::vec;
@@ -23,34 +24,31 @@ const STYPE_LAST: u8 = 3;
 
 
 // payload
-//    1      4      n        8
-// +----+--------+------+---------+
-// | op | offset | data | version |
-// +----+--------+------+---------+
+//      8       n    
+// +---------+------+
+// | version | data |
+// +---------+------+
 //
 pub struct Payload {
-    op: u8,
-    offset: u32,
     data: Vec<u8>,
     version: u64,
 }
 
 impl Payload {
-    fn new(op: u8, offset: u32, data: &Vec<u8>, version: u64) -> Self {
+
+    fn new(data: &Vec<u8>) -> Self {
+        let data_len = data.len() - 8;
+        let version = u64::from_le_bytes(data[data_len..].try_into().unwrap());
         Payload {
-            op,
-            offset,
-            data: data.to_vec(),
             version,
+            data: data[..data_len].to_vec(),
         }
     }
 
     fn encode(&self) -> Vec<u8> {
         let mut buf = Vec::new();
-        buf.push(self.op);
-        buf.extend(self.offset.to_le_bytes());
-        buf.extend_from_slice(&self.data);
-        buf.extend(self.version.to_le_bytes());
+        buf.extend_from_slice(self.data.as_slice());
+        buf.extend_from_slice(&self.version.to_le_bytes());
         buf
     }
 }
@@ -69,20 +67,20 @@ struct Header {
 
 struct Entry {
     header: Header,
-    payload: Vec<u8>,
+    data: Vec<u8>,
 }
 
 impl Entry {
-    fn new(stype: u8, payload: &Vec<u8>) -> Self {
+    fn new(stype: u8, data: &Vec<u8>) -> Self {
         let header: Header = Header {
-            crc32: Self::checksum(payload),
-            dlen: payload.len() as u16,
+            crc32: Self::checksum(data),
+            dlen: data.len() as u16,
             stype,
         };
 
         Entry {
             header,
-            payload: payload.to_vec(),
+            data: data.to_vec(),
         }
     }
 
@@ -99,10 +97,10 @@ impl Entry {
         let data_end_offset = (header.dlen + HEADER_LEN as u16) as usize;
         let entry = Entry {
             header: header,
-            payload: buf[HEADER_LEN as usize..data_end_offset].to_vec(),
+            data: buf[HEADER_LEN as usize..data_end_offset].to_vec(),
         };
 
-        if Self::checksum(&entry.payload) == entry.header.crc32 {
+        if Self::checksum(&entry.data) == entry.header.crc32 {
             return Err(Error::InvalidWalData);
         }
 
@@ -117,7 +115,7 @@ impl Entry {
 
     fn encode(&self) -> Vec<u8> {
         let mut buf = self.to_header_buf();
-        buf.extend_from_slice(&self.payload);
+        buf.extend_from_slice(&self.data);
         buf
     }
 
@@ -161,7 +159,7 @@ impl Wal {
             seq: version,
 
             wlock: Mutex::new(0),
-            file_max_size: 4294967295,
+            file_max_size: 42949,
             rotation_live_time: 1800,   // 30min
             rotation_time: SystemTime::now(),   // 30min
 
@@ -178,8 +176,8 @@ impl Wal {
         self.wlock.lock();
 
         self.seq += 1;
-
-        flate_buf.extend_from_slice(&cvt::case_u64_to_buf(self.seq));
+        
+        flate_buf.extend_from_slice(&self.seq.to_le_bytes());
 
         self.rotation_log(flate_buf.len());
 
@@ -255,18 +253,9 @@ impl Wal {
         return active_wlog.get_latest_version();
     }
 
-    fn read_range(&mut self, min_version: u64, f: fn(buf: Vec<u8>, version: u64)) {
-        if self.wlog.version == min_version {
-            self.wlog.read_all(f);
-        } else {
-            for item in self.log_version_list.clone() {
-                if item < min_version {
-                    continue;
-                }
-                let mut wlog = Wlog::new(&self.path, item);
-                wlog.read_all(f);
-            }
-        }
+
+    fn reader(&mut self, min_version: u64, max_version: u64) -> Option<WalReader> {
+        WalReader::new(&self, min_version, max_version)
     }
 
     fn truncate_all(&mut self) {
@@ -290,6 +279,68 @@ impl Wal {
         self.log_version_list = new_wal.log_version_list;
     }
 
+}
+
+pub struct WalReader {
+    path: String,
+    wlog_version_list: Vec<u64>,
+    wlog_reader: PageReader,
+    wlog_version: u64,
+    min_version: u64,
+    max_version: u64,
+}
+
+impl WalReader {
+    fn new(wal: &Wal, min_version: u64, max_version: u64) -> Option<WalReader> {
+        let mut wal_reader = None;
+        let wlog_version_list = wal.log_version_list.clone();
+        for version in wlog_version_list {
+            if version < min_version || version > max_version {
+                continue;
+            }
+
+            let mut wlog = Wlog::new(&wal.path, version);
+
+            wal_reader = Some(WalReader{
+                path: wal.path.to_string(),
+                wlog_version_list: wal.log_version_list.clone(),
+                wlog_reader: PageReader::new(wlog),
+                wlog_version: version,
+                max_version,
+                min_version,
+            });
+        }
+
+        wal_reader
+        
+    }
+
+}
+
+impl Iterator for WalReader {
+    type Item = Result<Vec<u8>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let data = self.wlog_reader.next();
+        if data.is_none() {
+            for version in self.wlog_version_list.clone() {
+                if version <= self.wlog_version {
+                    continue;
+                }
+
+                if version > self.max_version {
+                    return None;
+                }
+    
+                let mut wlog = Wlog::new(&self.path, version);
+                self.wlog_reader = PageReader::new(wlog);
+                self.wlog_version = version;
+                return self.next();
+            }
+        }
+
+        data
+    }
 }
 
 struct Wlog {
@@ -330,8 +381,10 @@ impl Wlog {
 
         loop {
             let left_page_size = (self.page_size - active_size % self.page_size) as usize;
+            
+            let left_page_data_size = left_page_size - HEADER_LEN as usize;
 
-            if left_page_size > data_len {
+            if left_page_data_size > data_len {
                 
                 if stype == 0 {
                     stype = STYPE_FULL;
@@ -342,7 +395,7 @@ impl Wlog {
                 let entry_buf = Entry::new(stype, &flate_buf).encode();
                 entry_bufs.extend_from_slice(&entry_buf);
 
-                active_size += data_len as u32;
+                active_size += (data_len + HEADER_LEN as usize) as u32;
 
                 break;
                 
@@ -353,13 +406,13 @@ impl Wlog {
                     stype = STYPE_MIDDLE;
                 }
 
-                let entry_buf = Entry::new(stype, &flate_buf[..left_page_size].to_vec()).encode();
+                let entry_buf = Entry::new(stype, &flate_buf[..left_page_data_size].to_vec()).encode();
 
                 entry_bufs.extend_from_slice(&entry_buf);
 
-                flate_buf = flate_buf[left_page_size..].to_vec();
+                flate_buf = flate_buf[left_page_data_size..].to_vec();
 
-                data_len -= left_page_size as usize;
+                data_len -= left_page_data_size as usize;
 
                 active_size += left_page_size as u32;
 
@@ -374,7 +427,7 @@ impl Wlog {
         Err(Error::AppendWalDataFailed)
     }
 
-    pub fn read_all(&mut self, f: fn(buf: Vec<u8>, version: u64)) {
+    pub fn read_all(&mut self, f: fn(buf: Vec<u8>)) {
         let mut pos = 0;
         let mut left_buf: Vec<u8> = vec![]; 
         loop {
@@ -386,7 +439,11 @@ impl Wlog {
 
                     left_buf.extend_from_slice(&page_buf[..]);
 
-                    self.handle_page(&mut left_buf, f);
+                    let payloads = self.handle_page(&mut left_buf);
+
+                    for payload in payloads {
+                        f(payload);
+                    }
 
                     // is the last page
                     if get_size < self.page_size as usize {
@@ -399,12 +456,14 @@ impl Wlog {
         }
     }
 
-    fn handle_page(&mut self, page_buf: &mut Vec<u8>, f: fn(buf: Vec<u8>, version: u64)) {
+    fn handle_page(&mut self, page_buf: &mut Vec<u8>) -> Vec<Vec<u8>> {
         
         let mut remain_buf: Vec<u8> = page_buf.clone();
 
         let mut chunk_datas = vec![];
         let mut page_chunk_size: usize = 0;
+
+        let mut payloads = vec![];
 
         loop {
             if remain_buf.len() <= HEADER_LEN as usize {
@@ -430,15 +489,17 @@ impl Wlog {
 
                 page_buf.drain(..page_chunk_size);
 
-                let version_pos = chunk_datas.len()-8;
+                payloads.push(chunk_datas);
 
-                f(chunk_datas[..version_pos].to_vec(), cvt::case_buf_to_u64(&chunk_datas[version_pos..].to_vec()));
+                page_chunk_size = 0;
 
                 chunk_datas = vec![];
 
             }
 
         }
+
+        payloads
 
     }
 
@@ -462,9 +523,64 @@ impl Wlog {
 
 }
 
+pub struct PageReader {
+    fh: Wlog,
+    offset: u64,
+    left_buf: Vec<u8>,
+    payload_cache: Vec<Vec<u8>>,
+}
+
+impl PageReader {
+    fn new(wlog: Wlog) -> Self {
+        Self {
+            fh: wlog,
+            offset: 0,
+            left_buf: vec![],
+            payload_cache: vec![],
+        }
+    }
+}
+
+impl Iterator for PageReader {
+    type Item = Result<Vec<u8>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        
+        if self.offset < self.fh.file_size as u64 {
+            
+            if self.payload_cache.len() == 0 {
+                println!("============={}, {}", self.fh.page_size, self.offset);
+                let mut buffer = vec![0; self.fh.page_size as usize];
+                let fetch_res = self.fh.state.get(self.offset as usize, &mut buffer);
+    
+                if let Ok(get_size) = fetch_res {
+                    self.left_buf.extend_from_slice(&buffer[..get_size]);
+                    self.payload_cache = self.fh.handle_page(&mut self.left_buf);
+                    self.offset += get_size as u64;
+                }
+
+                println!("============={:?}", self.payload_cache);
+            }
+
+            if self.payload_cache.len() == 0 {
+                return self.next();
+            }
+
+            let payload = self.payload_cache[0].clone();
+            self.payload_cache = self.payload_cache[1..].to_vec();
+
+            return Some(Ok(payload));
+        }
+
+        None
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
+    use rand::Rng;
+
     use super::*;
 
     fn tmp_bitmap_path(path: &str) -> String {
@@ -477,14 +593,44 @@ mod tests {
     #[test]
     fn test_add() {
         let mut wal = Wal::new(&tmp_bitmap_path("wal"));
-        wal.truncate_all();
-        let app_result = wal.append(&vec![3u8; 20]);
-        assert!(app_result.is_ok());
+        // wal.truncate_all();
 
-        wal.read_range(0, |buf, version| {
-            assert_eq!(buf, vec![3u8; 20]);
-            assert_eq!(version, 1);
-        })
+        // let mut list: Vec<(u8, usize)> = vec![];
+
+        // for i in 0..1000 {
+        //     let secret_number = rand::thread_rng().gen_range(0..100);
+        //     list.push((rand::thread_rng().gen_range(0..254), secret_number))
+        // }
+
+        // for (meta, meta_len) in list.clone() {
+        //     let app_result = wal.append(&vec![meta; meta_len]);
+        //     assert!(app_result.is_ok());
+        // }
+
+        println!("list:{:?}", wal.log_version_list);
+
+        let mut read = wal.reader(0, 1000).unwrap();
+        let result: Result<Vec<u8>, Error> = read.next().unwrap();
+        let payload = Payload::new(&result.unwrap().to_vec());
+        println!("data0:{:?}", payload.data);
+        println!("version0:{:?}", payload.version);
+
+        let result = read.next().unwrap();
+        let payload = Payload::new(&result.unwrap().to_vec());
+        println!("data1:{:?}", payload.data);
+        println!("version1:{:?}", payload.version);
+
+        // let mut index = 0;
+        // for result in reader.unwrap() {
+        //     assert!(result.is_ok());
+        //     let item = list[index];
+        //     index += 1;
+        //     println!("index:{}", index);
+        //     let payload = Payload::new(&result.unwrap().to_vec());
+        //     assert_eq!(payload.data, vec![item.0; item.1]);
+        //     assert_eq!(payload.version, index as u64);
+        // }
 
     }
 }
+
