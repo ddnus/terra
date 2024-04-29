@@ -11,6 +11,7 @@ pub struct BitMap {
 
 #[derive(Debug)]
 pub struct BlockMeta {
+    version: u64,
     bits: Vec<u8>,
     idles: BTreeMap<usize, usize>,
 
@@ -22,6 +23,7 @@ pub struct BlockMeta {
 impl BlockMeta {
     pub fn new(bits: Vec<u8>) -> Self {
         let mut block_meta = BlockMeta {
+            version: 0,
             bits: bits,
             idles: BTreeMap::new(),
             max: 0,

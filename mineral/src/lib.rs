@@ -7,3 +7,4 @@ mod types;
 mod cvt;
 mod flate;
 mod pagebuf;
+mod cache;
