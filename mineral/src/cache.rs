@@ -16,7 +16,6 @@ impl Cache {
     }
 
     pub fn get(&mut self, index: usize) -> Result<Vec<u8>, Error> {
-        // cache.get(&"apple").is_none()
         let cache = self.lru.get(&index);
         if cache.is_some() {
             return Ok(cache.unwrap().clone());

@@ -1,5 +1,6 @@
+use crate::state::disk::Disk;
 use crate::storage::{datablock::DataBlock};
-use crate::state::{self, State};
+use crate::state;
 use std::{cmp, io::Result};
 use byteorder::{BigEndian, ByteOrder};
 
@@ -9,17 +10,17 @@ const HEADER_SIZE: usize = 17;
 pub struct MainBlock {
     path: String,
     
-    state: Box<dyn State>,
+    state: Disk,
     // 一次性读取数据量
     fetch_size: usize,
 
     datablock: DataBlock,
 }
 
-pub struct Block {
-    header: Header, // 数据头部信息
-    data: Vec<u8>, // 数据块
-}
+// 标识位
+const FLAG_DEL: u8 = 0; // 删除
+const FLAG_NORMAL: u8 = 1;  // 未溢出
+const FLAG_OVERFLOW: u8 = 2; // 溢出
 
 pub struct Header {
     flag: u8,   // 标识位
@@ -29,13 +30,13 @@ pub struct Header {
 
 impl MainBlock {
 
-    pub fn new(path: &str, fetch_size: usize) -> Self {
+    pub fn new(path: &str, fetch_size: usize, delay: bool) -> Self {
         let main_block_file = state::build_path(path, MAIN_BLOCK_FILE_NAME);
         MainBlock {
             path: path.to_string(),
-            state: state::new(&main_block_file),
+            state: Disk::new(&main_block_file),
             fetch_size: fetch_size,
-            datablock: DataBlock::new(path, 1024),
+            datablock: DataBlock::new(path, 1024, delay),
         }
     }
 
@@ -65,19 +66,21 @@ impl MainBlock {
 
         let header = self.cast_to_header(&buf);
 
-        let mut main_data: Vec<u8> = buf[HEADER_SIZE..].to_vec();
+        if header.flag == FLAG_DEL {
+            return Ok(vec![]);
+        }
+
+        let real_size = cmp::min(self.fetch_size, header.size as usize + HEADER_SIZE);
+        let mut main_data = buf[HEADER_SIZE..real_size].to_vec();
 
         // 溢出情况，需要去数据块取
-        if header.flag > 0 && header.size as usize > (self.fetch_size - HEADER_SIZE) {
+        if header.flag == FLAG_OVERFLOW && header.size as usize > (self.fetch_size - HEADER_SIZE) {
             let remain_size = header.size as usize + HEADER_SIZE - self.fetch_size;
             let datablock = self.datablock.get(header.pos as usize, remain_size);
             match datablock {
                 Ok(data) => main_data.extend(&data),
-                Err(_) => {},
+                Err(err) => return Err(err),
             }
-        } else {
-            let real_size = cmp::min(self.fetch_size, header.size as usize + HEADER_SIZE);
-            main_data = buf[HEADER_SIZE..real_size].to_vec();
         }
 
         Ok(main_data)
@@ -87,7 +90,7 @@ impl MainBlock {
 
         let mut header = self.get_header(index)?;
 
-        header.flag = 0;
+        // header.flag = 0;
 
         let total_buf_size = buf.len();
         let main_buf_size = cmp::min(self.fetch_size - HEADER_SIZE, total_buf_size);
@@ -95,20 +98,23 @@ impl MainBlock {
         let mut main_buf_data = buf[..main_buf_size].to_vec();
 
         // 修改和新增
-        if header.flag == 1 {
+        if header.flag == FLAG_OVERFLOW {
             let old_data_buf_size = header.size as usize + HEADER_SIZE - self.fetch_size;
             // data buf中要存储的数据
             if total_buf_size > main_buf_size {
-                header.flag = 1;
+                header.flag = FLAG_OVERFLOW;
                 header.pos = self.datablock.update(header.pos as usize, old_data_buf_size, &buf[main_buf_size..].to_vec())? as u64;
             } else {
+                header.flag = FLAG_NORMAL;
                 self.datablock.free(header.pos as usize, old_data_buf_size)?;
             }
         } else {
             // data buf中要存储的数据
             if total_buf_size > main_buf_size {
-                header.flag = 1;
+                header.flag = FLAG_OVERFLOW;
                 header.pos = self.datablock.set(&buf[main_buf_size..].to_vec())? as u64;
+            } else {
+                header.flag = FLAG_NORMAL;
             }
         }
 
@@ -123,10 +129,31 @@ impl MainBlock {
         Ok(())
     }
 
+    pub fn del(&mut self, index: usize) -> Result<()> {
+        let mut header = self.get_header(index)?;
+        // 数据发生了溢出
+        if header.flag == FLAG_OVERFLOW {
+            let old_data_buf_size = header.size as usize + HEADER_SIZE - self.fetch_size;
+            self.datablock.free(header.pos as usize, old_data_buf_size)?;
+        }
+        header.flag = FLAG_DEL;
+        header.size = 0;
+        let block = self.cast_header_to_buf(&header);
+        self.state.set(self.get_real_pos(index), &block)
+    }
+
+    pub fn checkpoint(&mut self) -> u64 {
+        self.datablock.checkpoint()
+    }
+
     pub fn truncate(&mut self) -> Result<()> {
         self.datablock.truncate()?;
         self.state.truncate()?;
         Ok(())
+    }
+
+    pub fn flush_datablock(&mut self, version: usize) -> Result<()> {
+        self.datablock.flush(version)
     }
 
     fn cast_to_header(&self, buf: &Vec<u8>) -> Header {
@@ -158,12 +185,12 @@ mod tests {
     use super::*;
 
     fn tmp_path(path: &str) -> String {
-        std::env::temp_dir().to_str().unwrap().to_string() + "/wtfs/tests/" + path
+        std::env::temp_dir().to_str().unwrap().to_string() + "/terra/tests/" + path
     }
 
     #[test]
     fn test_get() {
-        let mut mb = MainBlock::new(&tmp_path("mainblock1"), 1024);
+        let mut mb = MainBlock::new(&tmp_path("mainblock1"), 1024, false);
         let _ = mb.truncate();
         let get_buf = mb.get(100);
         assert!(get_buf.is_ok());
@@ -172,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_get_and_set() {
-        let mut mb = MainBlock::new(&tmp_path("mainblock2"), 1024);
+        let mut mb = MainBlock::new(&tmp_path("mainblock2"), 1024, false);
         let _ = mb.truncate();
 
         let list: Vec<(u8, usize, usize)> = vec![

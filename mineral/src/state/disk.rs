@@ -28,45 +28,45 @@ impl Disk {
         }
     }
 
-}
+// }
 
-impl State for Disk  {
-    fn set(&mut self, pos: usize, buf: &[u8]) -> Result<()> {
+// impl State for Disk  {
+    pub fn set(&mut self, pos: usize, buf: &[u8]) -> Result<()> {
         self.handle.seek(SeekFrom::Start(pos as u64))?;
         self.handle.write_all(buf)?;
         Ok(())
     }
 
-    fn get(&mut self, pos: usize, buf: &mut [u8]) -> Result<usize> {
+    pub fn get(&mut self, pos: usize, buf: &mut [u8]) -> Result<usize> {
         self.handle.seek(SeekFrom::Start(pos as u64))?;
         let n = self.handle.read(buf)?;
         Ok(n)
     }
 
-    fn get_from_end(&mut self, pos: i64, buf: &mut [u8]) -> Result<usize> {
+    pub fn get_from_end(&mut self, pos: i64, buf: &mut [u8]) -> Result<usize> {
         self.handle.seek(SeekFrom::End(pos))?;
         let n = self.handle.read(buf)?;
         Ok(n)
     }
 
-    fn truncate(&mut self) ->Result<()> {
+    pub fn truncate(&mut self) ->Result<()> {
         self.handle.set_len(0)?;
         Ok(())
     }
 
-    fn append(&mut self, buf: &[u8]) -> Result<()> {
+    pub fn append(&mut self, buf: &[u8]) -> Result<()> {
         self.handle.seek(SeekFrom::End(0))?;
         self.handle.write_all(buf)?;
         Ok(())
     }
 
-    fn prepend(&mut self, buf: &[u8]) -> Result<()> {
+    pub fn prepend(&mut self, buf: &[u8]) -> Result<()> {
         self.handle.seek(SeekFrom::Start(0))?;
         self.handle.write_all(buf)?;
         Ok(())
     }
 
-    fn meta(&self) -> Result<MetaData> {
+    pub fn meta(&self) -> Result<MetaData> {
         let metadata = self.handle.metadata();
         #[cfg(target_family = "windows")]
         let file_size = metadata.unwrap().file_size();
@@ -78,9 +78,12 @@ impl State for Disk  {
         })
     }
 
-    fn remove(&self) -> Result<()> {
-        fs::remove_file(self.path.as_str())?;
-        Ok(())
+    pub fn rename(&self, path: &str) -> Result<()> {
+        fs::rename(self.path.as_str(), path)
+    }
+
+    pub fn remove(&self) -> Result<()> {
+        fs::remove_file(self.path.as_str())
     }
 
 }

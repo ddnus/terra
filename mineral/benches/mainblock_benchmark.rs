@@ -3,7 +3,7 @@ use mineral::storage::mainblock::MainBlock;
 use rand::Rng;
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let mut mb = MainBlock::new("/tmp/wtfs/benches/", 1155);
+    let mut mb = MainBlock::new("/tmp/wtfs/benches/", 1155, false);
     let _ = mb.truncate();
 
     c.bench_function("test set: 1G-100byte-0", |b| b.iter(|| {

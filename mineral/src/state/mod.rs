@@ -1,9 +1,9 @@
-use std::{fs, io::Result, path::Path};
+use std::{fmt::Debug, fs, io::Result, path::Path, sync::Arc};
 
-mod disk;
+pub mod disk;
 use disk::*;
 
-pub(crate) trait State {
+pub(crate) trait State: Debug + Clone + Send + Sync + 'static {
     fn set(&mut self, pos: usize, buf: &[u8]) -> Result<()>;
 
     fn get(&mut self, pos: usize, buf: &mut [u8]) -> Result<usize>;
@@ -25,9 +25,9 @@ pub struct MetaData {
     pub size: usize,
 }
 
-pub fn new(path: &str) -> Box<dyn State> {
-    Box::new(Disk::new(path))
-}
+// pub fn new(path: &str) -> State {
+//     Disk::new(path)
+// }
 
 pub fn build_path(path: &str, file_name: &str) -> String {
     let binding = Path::new(path);

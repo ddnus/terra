@@ -1,11 +1,10 @@
 use crc32fast::Hasher;
 use glob::glob;
 
-use crate::{cvt, flate};
+use crate::state::disk::Disk;
 use crate::error::Error;
-use crate::state::{self, State};
+use crate::state::{self};
 use std::fmt::Display;
-use std::path::Iter;
 use std::sync::Mutex;
 use std::time::SystemTime;
 use std::vec;
@@ -24,31 +23,38 @@ const STYPE_LAST: u8 = 3;
 
 
 // payload
-//      8       n    
-// +---------+------+
-// | version | data |
-// +---------+------+
+//     n       8    
+// +------+---------+
+// | data | version |
+// +------+---------+
 //
 pub struct Payload {
-    data: Vec<u8>,
-    version: u64,
+    pub data: Vec<u8>,
+    pub version: u64,
 }
 
 impl Payload {
 
-    fn new(data: &Vec<u8>) -> Self {
-        let data_len = data.len() - 8;
-        let version = u64::from_le_bytes(data[data_len..].try_into().unwrap());
+    pub fn new(version: u64, data: &Vec<u8>) -> Self {
         Payload {
             version,
-            data: data[..data_len].to_vec(),
+            data: data.clone(),
         }
     }
 
-    fn encode(&self) -> Vec<u8> {
+    pub fn decode(buf: &Vec<u8>) -> Self {
+        let data_len = buf.len() - 8;
+        let version = u64::from_be_bytes(buf[data_len..].try_into().unwrap());
+        Payload {
+            version,
+            data: buf[..data_len].to_vec(),
+        }
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         buf.extend_from_slice(self.data.as_slice());
-        buf.extend_from_slice(&self.version.to_le_bytes());
+        buf.extend_from_slice(&self.version.to_be_bytes());
         buf
     }
 }
@@ -86,8 +92,8 @@ impl Entry {
 
     fn to_header(buf: &Vec<u8>) -> Header {
         Header {
-            crc32: cvt::case_buf_to_u32(&buf[..4].to_vec()),
-            dlen: cvt::case_buf_to_u16(&buf[4..6].to_vec()),
+            crc32: u32::from_be_bytes(buf[..4].try_into().unwrap()),
+            dlen: u16::from_be_bytes(buf[4..6].try_into().unwrap()),
             stype: buf[6],
         }
     }
@@ -129,6 +135,7 @@ impl Entry {
 }
 
 const WAL_NAME: &str = "@wal";
+const WAL_CK_NAME: &str = "@checked-wal";
 
 pub struct Wal {
     seq: u64,
@@ -171,22 +178,29 @@ impl Wal {
         wal
     }
 
-    pub fn append(&mut self, buf: &Vec<u8>) -> Result<(), Error> {
+    pub fn append(&mut self, buf: &Vec<u8>) -> Result<u64, Error> {
         let mut flate_buf = buf.clone();
-        self.wlock.lock();
+        // self.wlock.lock();
 
         self.seq += 1;
         
-        flate_buf.extend_from_slice(&self.seq.to_le_bytes());
+        flate_buf = Payload::new(self.seq, &flate_buf).encode();
 
-        self.rotation_log(flate_buf.len());
+        self.rotation_log(flate_buf.len(), false);
 
-        self.wlog.append(&flate_buf)
+        let save_res = self.wlog.append(&flate_buf);
+        
+        if let Err(err) = save_res {
+            return Err(err);
+        }
+
+        Ok(self.seq)
     }
 
-    fn rotation_log(&mut self, buf_len: usize) {
+    fn rotation_log(&mut self, buf_len: usize, force: bool) {
 
-        if buf_len + self.wlog.file_size as usize > self.file_max_size as usize  || 
+        if force || 
+            buf_len + self.wlog.file_size as usize > self.file_max_size as usize  || 
             (self.rotation_live_time > 0 &&
             SystemTime::now().duration_since(self.rotation_time).unwrap().as_secs() > self.rotation_live_time) {
 
@@ -253,9 +267,34 @@ impl Wal {
         return active_wlog.get_latest_version();
     }
 
-
-    fn reader(&mut self, min_version: u64, max_version: u64) -> Option<WalReader> {
+    pub fn reader(&mut self, min_version: u64, max_version: u64) -> Option<WalReader> {
         WalReader::new(&self, min_version, max_version)
+    }
+
+    pub fn checked_version(&mut self, lt_version: u64) -> Vec<u64> {
+        if self.wlog.version <= lt_version {
+            // 当活动日志存在数据时，强制轮转
+            if self.wlog.file_size > 0 {
+                self.rotation_log(0, true);
+            }
+        }
+
+        let mut version_list = self.log_version_list.clone();
+        version_list.pop();
+
+        let mut checked_list = vec![];
+
+        for version in version_list {
+            if version >= lt_version {
+                break;
+            }
+
+            if let Ok(_) = Wlog::new(&self.path, version).checked() {
+                checked_list.push(version);
+            }
+        }
+
+        checked_list
     }
 
     fn truncate_all(&mut self) {
@@ -295,7 +334,7 @@ impl WalReader {
         let mut wal_reader = None;
         let wlog_version_list = wal.log_version_list.clone();
         for version in wlog_version_list {
-            if version < min_version || version > max_version {
+            if version < min_version || (max_version > 0 && version > max_version) {
                 continue;
             }
 
@@ -320,7 +359,7 @@ impl WalReader {
 }
 
 impl Iterator for WalReader {
-    type Item = Result<Vec<u8>, Error>;
+    type Item = Result<Payload, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let data = self.wlog_reader.next();
@@ -330,7 +369,7 @@ impl Iterator for WalReader {
                     continue;
                 }
 
-                if version > self.max_version {
+                if self.max_version > 0 && version > self.max_version {
                     return None;
                 }
     
@@ -346,7 +385,8 @@ impl Iterator for WalReader {
 }
 
 struct Wlog {
-    state: Box<dyn State>,
+    path: String,
+    state: Disk,
     version: u64,
     page_size: u32,
     file_size: u32,
@@ -356,9 +396,10 @@ impl Wlog {
     fn new(path: &str, seq: u64) -> Self {
         
         let log_file = state::build_path(path, &format!("{}-{}", WAL_NAME, seq));
-        let state_handle = state::new(&log_file);
+        let state_handle = Disk::new(&log_file);
         let size = state_handle.meta().unwrap().size as u32;
         Self {
+            path: path.to_string(),
             state: state_handle,
             version: seq,
             page_size: 32768,   // 32kb
@@ -513,7 +554,7 @@ impl Wlog {
         let mut version_buf = [0u8; 8];
         if let Ok(size) = self.state.get_from_end(-8, &mut version_buf) {
             if size == 8 {
-                return Ok(cvt::case_buf_to_u64(&version_buf.to_vec()));
+                return Ok(u64::from_be_bytes(version_buf.try_into().unwrap()));
             } else {
                 panic!("Read version size: {} error", size);
             }
@@ -522,8 +563,19 @@ impl Wlog {
         }
     }
 
-    fn delete(&mut self) {
-        self.state.remove();
+    fn checked(&mut self) -> Result<bool, Error> {
+        let checked_path = state::build_path(&self.path, &format!("{}-{}", WAL_CK_NAME, self.version));
+        if let Err(err) = self.state.rename(&checked_path) {
+            return Err(Error::WalCheckedFailed(err));
+        }
+        Ok(true)
+    }
+
+    fn delete(&mut self) -> Result<bool, Error> {
+        if let Err(err) = self.state.remove() {
+            return Err(Error::WalDelFailed(err));
+        }
+        Ok(true)
     }
 
 }
@@ -547,14 +599,14 @@ impl PageReader {
 }
 
 impl Iterator for PageReader {
-    type Item = Result<Vec<u8>, Error>;
+    type Item = Result<Payload, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         
         if self.payload_cache.len() > 0 {
             let payload = self.payload_cache[0].clone();
             self.payload_cache = self.payload_cache[1..].to_vec();
-            return Some(Ok(payload));
+            return Some(Ok(Payload::decode(&payload)));
         }
 
         if self.offset < self.fh.file_size as u64 {
@@ -616,7 +668,7 @@ mod tests {
             assert!(result.is_ok());
             let item = list[index];
             index += 1;
-            let payload = Payload::new(&result.unwrap().to_vec());
+            let payload = result.unwrap();
             assert_eq!(payload.data, vec![item.0; item.1]);
             assert_eq!(payload.version, index as u64);
         }

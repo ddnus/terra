@@ -1,17 +1,21 @@
 use std::{collections::BTreeMap, io::Result, str};
-use crate::state::{self, State};
+use crate::state::{self, disk::Disk};
 
 const BITMAP_FILE_NAME: &str = "@bitmap";
 
+
+#[derive(Debug)]
 pub struct BitMap {
+    checkpoint: u64,
+    version: u64,
+    delay: bool,
     meta: BlockMeta,
-    state: Box<dyn State>,
+    state: Disk,
 }
 
 
 #[derive(Debug)]
 pub struct BlockMeta {
-    version: u64,
     bits: Vec<u8>,
     idles: BTreeMap<usize, usize>,
 
@@ -23,7 +27,6 @@ pub struct BlockMeta {
 impl BlockMeta {
     pub fn new(bits: Vec<u8>) -> Self {
         let mut block_meta = BlockMeta {
-            version: 0,
             bits: bits,
             idles: BTreeMap::new(),
             max: 0,
@@ -211,23 +214,27 @@ impl BlockMeta {
 
 impl BitMap {
     // 创建一个新的位图，所有位都初始化为0，0位表示空闲，1位表示占用
-    pub fn new(path: &str) -> Self {
+    pub fn new(path: &str, delay: bool) -> Self {
         let bytemap_path = state::build_path(path, BITMAP_FILE_NAME);
-        let mut stat = state::new(&bytemap_path);
+        let mut stat = Disk::new(&bytemap_path);
         let sz = stat.meta().unwrap().size;
         let mut bites = vec![];
+        let mut checkpoint: u64 = 0;
 
         if sz > 0 {
-            bites = vec![0u8; sz as usize];
-            let _ = stat.get(0, &mut bites);
+            let mut bitmeta = vec![0u8; sz as usize];
+            let _ = stat.get(0, &mut bitmeta);
+            checkpoint = u64::from_be_bytes(bitmeta[..8].try_into().unwrap());
+            bites = bitmeta[8..].to_vec()
         }
 
-        let mut bitmap = BitMap {
+        BitMap {
             meta: BlockMeta::new(bites),
             state: stat,
-        };
-        
-        bitmap
+            delay,
+            version: checkpoint,
+            checkpoint: checkpoint,
+        }
     }
 
     // 获取位图总位数
@@ -273,16 +280,33 @@ impl BitMap {
         }
     }
 
+    pub fn flush_all(&mut self, version: u64) -> Result<()> {
+        self.checkpoint = version;
+        let mut buf = version.to_be_bytes().to_vec();
+        buf.extend_from_slice(&self.meta.bits[..]);
+        self.state.set(0, &buf)?;
+        Ok(())
+    }
+
+    pub fn checkpoint(&self) -> u64 {
+        self.checkpoint
+    }
+
     pub fn flush(&mut self, index: usize, size: usize) -> Result<()> {
-        let bit_index = index / 8;
-        let byte_len = (size + 7) / 8;
-        self.state.set(bit_index, &self.meta.bits[bit_index..bit_index+byte_len])?;
+        if !self.delay {
+            let bit_index = index / 8;
+            let byte_len = (size + 7) / 8;
+            self.state.set(bit_index + 8, &self.meta.bits[bit_index..bit_index+byte_len])?;
+        }
         Ok(())
     }
 
     pub fn truncate(&mut self) -> Result<()> {
         self.meta.truncate();
-        self.state.truncate()?;
+        if !self.delay {
+            self.state.truncate()?;
+        }
+
         Ok(())
     }
 
@@ -300,12 +324,12 @@ mod tests {
     use super::*;
 
     fn tmp_bitmap_path(path: &str) -> String {
-        std::env::temp_dir().to_str().unwrap().to_string() + "/wtfs/tests/" + path
+        std::env::temp_dir().to_str().unwrap().to_string() + "/terra/tests/bitmap/" + path
     }
 
     #[test]
     fn test_new_bitmap() {
-        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap1"));
+        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap1"), false);
         let _ = bitmap.truncate();
         
         assert_eq!(bitmap.len(), 0);
@@ -323,7 +347,7 @@ mod tests {
         let _ = bitmap.free(9, 10);
         bitmap.print();
 
-        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap1"));
+        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap1"), false);
         bitmap.print();
         let index = bitmap.malloc(5);
         bitmap.print();
@@ -336,7 +360,7 @@ mod tests {
 
     #[test]
     fn test_get_bit() {
-        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap2"));
+        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap2"), false);
         let _ = bitmap.truncate();
         assert_eq!(bitmap.meta.get_bit(0b00000001, 7), 1);
         assert_eq!(bitmap.meta.get_bit(0b00000010, 6), 1);
@@ -348,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_find_next_n_zeros() {
-        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap2"));
+        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap2"), false);
         let _ = bitmap.truncate();
         bitmap.meta.bits.push(0b11110000);   // 前4位被占用
         assert_eq!(bitmap.find_next_n_zeros(4), Some(4)); // 下一个4个连续的0位从索引4开始
@@ -356,7 +380,7 @@ mod tests {
 
     #[test]
     fn test_malloc_and_free() {
-        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap2"));
+        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap2"), false);
         let _ = bitmap.truncate();
         let index = bitmap.malloc(4);
         assert_eq!(index, 0); // 应该从索引0开始分配
@@ -367,7 +391,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "bit_index out of range (0-7)")]
     fn test_get_bit_out_of_range() {
-        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap2"));
+        let mut bitmap = BitMap::new(&tmp_bitmap_path("bitmap2"), false);
         let _ = bitmap.truncate();
         bitmap.meta.get_bit(0b00000001, 8); // 应该触发恐慌，因为索引超出范围
     }

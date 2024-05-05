@@ -1,35 +1,47 @@
-use std::path::Path;
+use std::collections::BTreeMap;
 use std::io::Result;
-
-use crate::storage::{bytemap::BitMap};
-use crate::state::{self, State};
+use crate::state::disk::Disk;
+use crate::storage::{bitmap::BitMap};
+use crate::state;
 
 const DATA_BLOCK_FILE_NAME: &str = "@datablock";
 
+#[derive(Debug)]
 pub struct DataBlock {
     // header: BlockHeader,
-    state: Box<dyn State>,
+    state: Disk,
 
     bitmap: BitMap,
 
     block_size: usize,
+
+    delay: bool,
+    delay_bufs: BTreeMap<usize, Vec<u8>>,
 }
 
-
 impl DataBlock {
-    pub fn new(path: &str, block_size: usize) -> Self {
+    pub fn new(path: &str, block_size: usize, delay: bool) -> Self {
         let datablock_path = state::build_path(path, DATA_BLOCK_FILE_NAME);
 
         DataBlock {
-            state: state::new(datablock_path.as_str()),
-            bitmap: BitMap::new(path),
+            state: Disk::new(datablock_path.as_str()),
+            bitmap: BitMap::new(path, delay),
             block_size: block_size,
+            delay,
+            delay_bufs: BTreeMap::new(),
         }
     }
 
     pub fn get(&mut self, index: usize, size: usize) -> Result<Vec<u8>> {
         let mut buf = vec![0u8; size as usize];
         let pos = index * self.block_size;
+        // 优先查询缓存
+        if self.delay {
+            if let Some(delay_buf) = self.delay_bufs.get(&pos) {
+                return Ok(delay_buf.clone());
+            }
+        }
+
         self.state.get(pos, &mut buf)?;
         Ok(buf)
     }
@@ -40,8 +52,11 @@ impl DataBlock {
         let index = self.bitmap.malloc(block_nums);
 
         let pos = index * self.block_size;
-
-        self.state.set(pos, buf)?;
+        if self.delay {
+            self.delay_bufs.insert(pos, buf.clone());
+        } else {
+            self.state.set(pos, buf)?;
+        }
         
         Ok(index)
     }
@@ -70,9 +85,32 @@ impl DataBlock {
             index = self.bitmap.malloc(block_nums);
         }
 
-        self.state.set(index * self.block_size, new_buf)?;
+        let pos = index * self.block_size;
+
+        if self.delay {
+            self.delay_bufs.insert(pos, new_buf.clone());
+        } else {
+            self.state.set(pos, new_buf)?;
+        }
 
         Ok(index)
+    }
+
+    pub fn flush(&mut self, version: usize) -> Result<()> {
+        if !self.delay {
+            return Ok(());
+        }
+
+        for (pos, buf) in self.delay_bufs.clone() {
+            self.state.set(pos, &buf)?;
+        }
+        
+        // flush 
+        self.bitmap.flush_all(version as u64)
+    }
+
+    pub fn checkpoint(&self) -> u64 {
+        self.bitmap.checkpoint()
     }
 
 }
@@ -82,12 +120,12 @@ mod tests {
     use super::*;
 
     fn tmp_path(path: &str) -> String {
-        std::env::temp_dir().to_str().unwrap().to_string() + "/wtfs/tests/" + path
+        std::env::temp_dir().to_str().unwrap().to_string() + "/terra/tests/" + path
     }
 
     #[test]
     fn test_get() {
-        let mut db = DataBlock::new(&tmp_path("datablock1"), 1024);
+        let mut db = DataBlock::new(&tmp_path("datablock1"), 1024, false);
         let _ = db.truncate();
 
         let list: Vec<(u8, usize, usize)> = vec![
@@ -117,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_free() {
-        let mut db = DataBlock::new(&tmp_path("datablock2"), 1024);
+        let mut db = DataBlock::new(&tmp_path("datablock2"), 1024, false);
         let _ = db.truncate();
 
         let list: Vec<(bool, usize, usize)> = vec![

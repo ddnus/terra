@@ -1,20 +1,21 @@
-use std::{collections::BTreeMap, time::SystemTime};
+use std::{cmp::Ordering, collections::{BTreeMap, HashMap}, time::{Duration, SystemTime}};
 
 use crate::error::Error;
+
+use super::{slot::Slot, Bytes};
 
 type PageNo = usize;
 type PageCap = usize;
 type EntryPos = usize;
 type VersionNo = usize;
 
-type Entry = Vec<u8>;
 
 #[derive(Debug, Clone)]
 pub struct Page {
     page_no: PageNo,
     pub max_version: usize,
     cap: PageCap,
-    pub entrys: BTreeMap<EntryPos, Entry>,
+    pub entrys: HashMap<usize, Bytes>,
 }
 
 impl Page {
@@ -23,16 +24,16 @@ impl Page {
             page_no,
             max_version: page_no,
             cap: 0,
-            entrys: BTreeMap::new(),
+            entrys: HashMap::new(),
         }
     }
 
-    fn insert(&mut self, version: usize, entry_pos: EntryPos, entry: Entry) {
+    fn insert(&mut self, version: usize, slot_no: usize, slot_data: Bytes) {
         if version > self.max_version {
             self.max_version = version;
         }
-        self.cap += entry.len();
-        self.entrys.insert(entry_pos, entry);
+        self.cap += slot_data.len();
+        self.entrys.insert(slot_no, slot_data);
     }
 }
 
@@ -46,7 +47,6 @@ pub struct Cbf {
     rotation_time: SystemTime,
 }
 
-
 impl Cbf {
     pub fn new(cap: usize) -> Self {
         Cbf {
@@ -55,17 +55,19 @@ impl Cbf {
             page_max_cap: cap,
             active_page: Page::new(0),
 
-            rotation_live_time: 5,   // 5min
+            rotation_live_time: 5,   // 5s
             rotation_time: SystemTime::now(),
 
         }
     }
 
-    pub fn insert(&mut self, version: VersionNo, entry_pos: EntryPos, buf: Vec<u8>) -> Result<(), Error> {
+    pub fn insert(&mut self, version: usize, slot: &Slot) -> Result<(), Error> {
         self.version = version;
 
-        self.rotation_page(buf.len());
-        self.active_page.insert(version, entry_pos, buf);
+        let slot_buf = slot.encode().unwrap();
+        self.rotation_page(slot_buf.len());
+        
+        self.active_page.insert(version, slot.slot_no, slot_buf);
 
         Ok(())
     }
@@ -80,16 +82,16 @@ impl Cbf {
         }
     }
 
-    pub fn get(&mut self, entry_pos: EntryPos) -> Option<Vec<u8>> {
-        let opt_data = self.active_page.entrys.get(&entry_pos);
+    pub fn get(&mut self, slot_no: usize) -> Option<Slot> {
+        let opt_data = self.active_page.entrys.get(&slot_no);
         if let Some(data) = opt_data {
-            return Some(data.clone());
+            return Some(Slot::new(slot_no, data.clone()).unwrap());
         }
 
         for (page_no, page) in self.pages.range(..).rev() {
-            let opt_data = page.entrys.get(&entry_pos);
+            let opt_data = page.entrys.get(&slot_no);
             if let Some(data) = opt_data {
-                return Some(data.clone());
+                return Some(Slot::new(slot_no, data.clone()).unwrap());
             }
         }
         
@@ -105,33 +107,6 @@ impl Cbf {
         None
     }
 
-}
+    
 
-#[cfg(test)]
-mod tests {
-    use rand::Rng;
-
-    use super::*;
-
-    #[test]
-    fn insert_test() {
-        let mut cbf = Cbf::new(1024);
-        let version = 0;
-        let mut list: Vec<(usize, usize, Vec<u8>)> = vec![];
-        for i in 0..100 {
-            let secret_number = rand::thread_rng().gen_range(0..100);
-            list.push((i as usize, i as usize, vec![(i + 1) as u8; secret_number]));
-        }
-        
-        for item in list.clone() {
-            cbf.insert(item.0, item.1, item.2);
-        }
-
-        for item in list {
-            let a = cbf.get(item.0);
-            assert!(a.is_some());
-            assert_eq!(a.unwrap(), item.2);
-        }
-        println!("pages: {}", cbf.pages.len());
-    }
 }

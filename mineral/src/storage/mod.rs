@@ -1,5 +1,6 @@
-mod bytemap;
+mod bitmap;
 pub mod mainblock;
 mod datablock;
-mod page;
 mod cbf;
+pub mod wal;
+pub mod serve;
