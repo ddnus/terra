@@ -6,4 +6,4 @@ use slot::Slot;
 
 mod cbf;
 mod wal;
-mod hash;
+pub mod hash;

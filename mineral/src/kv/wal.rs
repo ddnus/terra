@@ -1,5 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use crate::{error::Error, storage::wal::{Wal, WalReader}};
 
 use super::Bytes;
@@ -53,6 +51,7 @@ impl KvWalEntry {
 const OP_SET: u8 = 1;
 const OP_DEL: u8 = 2;
 
+#[derive(Debug)]
 pub struct KvWal {
     wal: Wal,
 }

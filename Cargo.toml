@@ -1,4 +1,4 @@
-workspace = { members = [ "mineral", "p2p"] }
+workspace = { members = [ "mineral", "peer"] }
 [package]
 name = "terra"
 version = "0.1.0"

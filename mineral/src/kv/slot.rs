@@ -1,6 +1,6 @@
 
 use core::str;
-use std::{collections::HashMap, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use serde::{Deserialize, Serialize};
 use crate::error::Error;
 use super::Bytes;

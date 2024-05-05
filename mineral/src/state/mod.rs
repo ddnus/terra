@@ -1,7 +1,6 @@
-use std::{fmt::Debug, fs, io::Result, path::Path, sync::Arc};
+use std::{fmt::Debug, fs, io::Result, path::Path};
 
 pub mod disk;
-use disk::*;
 
 pub(crate) trait State: Debug + Clone + Send + Sync + 'static {
     fn set(&mut self, pos: usize, buf: &[u8]) -> Result<()>;

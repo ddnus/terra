@@ -137,6 +137,7 @@ impl Entry {
 const WAL_NAME: &str = "@wal";
 const WAL_CK_NAME: &str = "@checked-wal";
 
+#[derive(Debug)]
 pub struct Wal {
     seq: u64,
     path: String,
@@ -384,6 +385,7 @@ impl Iterator for WalReader {
     }
 }
 
+#[derive(Debug)]
 struct Wlog {
     path: String,
     state: Disk,

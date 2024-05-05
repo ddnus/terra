@@ -1,11 +1,24 @@
+mod get;
+pub use get::Get;
 
+mod set;
+pub use set::Set;
+
+mod ping;
+pub use ping::Ping;
+
+mod unknown;
+pub use unknown::Unknown;
+
+use crate::{Connection, Db, Frame, Parse, ParseError, Shutdown};
+
+/// Enumeration of supported Redis commands.
+///
+/// Methods called on `Command` are delegated to the command implementation.
 #[derive(Debug)]
 pub enum Command {
     Get(Get),
-    Publish(Publish),
     Set(Set),
-    Subscribe(Subscribe),
-    Unsubscribe(Unsubscribe),
     Ping(Ping),
     Unknown(Unknown),
 }
@@ -36,10 +49,7 @@ impl Command {
         // specific command.
         let command = match &command_name[..] {
             "get" => Command::Get(Get::parse_frames(&mut parse)?),
-            "publish" => Command::Publish(Publish::parse_frames(&mut parse)?),
             "set" => Command::Set(Set::parse_frames(&mut parse)?),
-            "subscribe" => Command::Subscribe(Subscribe::parse_frames(&mut parse)?),
-            "unsubscribe" => Command::Unsubscribe(Unsubscribe::parse_frames(&mut parse)?),
             "ping" => Command::Ping(Ping::parse_frames(&mut parse)?),
             _ => {
                 // The command is not recognized and an Unknown command is
@@ -75,14 +85,9 @@ impl Command {
 
         match self {
             Get(cmd) => cmd.apply(db, dst).await,
-            Publish(cmd) => cmd.apply(db, dst).await,
             Set(cmd) => cmd.apply(db, dst).await,
-            Subscribe(cmd) => cmd.apply(db, dst, shutdown).await,
             Ping(cmd) => cmd.apply(dst).await,
             Unknown(cmd) => cmd.apply(dst).await,
-            // `Unsubscribe` cannot be applied. It may only be received from the
-            // context of a `Subscribe` command.
-            Unsubscribe(_) => Err("`Unsubscribe` is unsupported in this context".into()),
         }
     }
 
@@ -90,10 +95,7 @@ impl Command {
     pub(crate) fn get_name(&self) -> &str {
         match self {
             Command::Get(_) => "get",
-            Command::Publish(_) => "pub",
             Command::Set(_) => "set",
-            Command::Subscribe(_) => "subscribe",
-            Command::Unsubscribe(_) => "unsubscribe",
             Command::Ping(_) => "ping",
             Command::Unknown(cmd) => cmd.get_name(),
         }

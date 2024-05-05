@@ -42,6 +42,7 @@ impl BlockOp {
     }
 }
 
+#[derive(Debug)]
 pub struct Serve {
     mainblock: Arc<Mutex<MainBlock>>,
     wal: Arc<Mutex<Wal>>,

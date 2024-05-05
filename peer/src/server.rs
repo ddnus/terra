@@ -1,13 +1,19 @@
-use std::sync::Arc;
-use std::future::Future;
+//! Minimal Redis server implementation
+//!
+//! Provides an async `run` function that listens for inbound connections,
+//! spawning a task per connection.
 
+use crate::{Command, Connection, Db, DbDropGuard, Shutdown};
+
+use std::future::Future;
+use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
-use crate::Command;
 use tokio::sync::{broadcast, mpsc, Semaphore};
 use tokio::time::{self, Duration};
-use tracing::{error, info, instrument};
+use tracing::{debug, error, info, instrument};
 
-
+/// Server listener state. Created in the `run` call. It includes a `run` method
+/// which performs the TCP listening and initialization of per-connection state.
 #[derive(Debug)]
 struct Listener {
     /// Shared database handle.
@@ -17,33 +23,109 @@ struct Listener {
     ///
     /// This holds a wrapper around an `Arc`. The internal `Db` can be
     /// retrieved and passed into the per connection state (`Handler`).
-    // db_holder: DbDropGuard,
+    db_holder: DbDropGuard,
 
+    /// TCP listener supplied by the `run` caller.
     listener: TcpListener,
 
+    /// Limit the max number of connections.
+    ///
+    /// A `Semaphore` is used to limit the max number of connections. Before
+    /// attempting to accept a new connection, a permit is acquired from the
+    /// semaphore. If none are available, the listener waits for one.
+    ///
+    /// When handlers complete processing a connection, the permit is returned
+    /// to the semaphore.
     limit_connections: Arc<Semaphore>,
 
+    /// Broadcasts a shutdown signal to all active connections.
+    ///
+    /// The initial `shutdown` trigger is provided by the `run` caller. The
+    /// server is responsible for gracefully shutting down active connections.
+    /// When a connection task is spawned, it is passed a broadcast receiver
+    /// handle. When a graceful shutdown is initiated, a `()` value is sent via
+    /// the broadcast::Sender. Each active connection receives it, reaches a
+    /// safe terminal state, and completes the task.
     notify_shutdown: broadcast::Sender<()>,
 
+    /// Used as part of the graceful shutdown process to wait for client
+    /// connections to complete processing.
+    ///
+    /// Tokio channels are closed once all `Sender` handles go out of scope.
+    /// When a channel is closed, the receiver receives `None`. This is
+    /// leveraged to detect all connection handlers completing. When a
+    /// connection handler is initialized, it is assigned a clone of
+    /// `shutdown_complete_tx`. When the listener shuts down, it drops the
+    /// sender held by this `shutdown_complete_tx` field. Once all handler tasks
+    /// complete, all clones of the `Sender` are also dropped. This results in
+    /// `shutdown_complete_rx.recv()` completing with `None`. At this point, it
+    /// is safe to exit the server process.
     shutdown_complete_tx: mpsc::Sender<()>,
 }
 
+/// Per-connection handler. Reads requests from `connection` and applies the
+/// commands to `db`.
 #[derive(Debug)]
 struct Handler {
-
+    /// Shared database handle.
+    ///
+    /// When a command is received from `connection`, it is applied with `db`.
+    /// The implementation of the command is in the `cmd` module. Each command
+    /// will need to interact with `db` in order to complete the work.
     db: Db,
 
+    /// The TCP connection decorated with the redis protocol encoder / decoder
+    /// implemented using a buffered `TcpStream`.
+    ///
+    /// When `Listener` receives an inbound connection, the `TcpStream` is
+    /// passed to `Connection::new`, which initializes the associated buffers.
+    /// `Connection` allows the handler to operate at the "frame" level and keep
+    /// the byte level protocol parsing details encapsulated in `Connection`.
     connection: Connection,
 
+    /// Listen for shutdown notifications.
+    ///
+    /// A wrapper around the `broadcast::Receiver` paired with the sender in
+    /// `Listener`. The connection handler processes requests from the
+    /// connection until the peer disconnects **or** a shutdown notification is
+    /// received from `shutdown`. In the latter case, any in-flight work being
+    /// processed for the peer is continued until it reaches a safe state, at
+    /// which point the connection is terminated.
     shutdown: Shutdown,
 
+    /// Not used directly. Instead, when `Handler` is dropped...?
     _shutdown_complete: mpsc::Sender<()>,
 }
 
+/// Maximum number of concurrent connections the redis server will accept.
+///
+/// When this limit is reached, the server will stop accepting connections until
+/// an active connection terminates.
+///
+/// A real application will want to make this value configurable, but for this
+/// example, it is hard coded.
+///
+/// This is also set to a pretty low value to discourage using this in
+/// production (you'd think that all the disclaimers would make it obvious that
+/// this is not a serious project... but I thought that about mini-http as
+/// well).
 const MAX_CONNECTIONS: usize = 250;
 
-
+/// Run the mini-redis server.
+///
+/// Accepts connections from the supplied listener. For each inbound connection,
+/// a task is spawned to handle that connection. The server runs until the
+/// `shutdown` future completes, at which point the server shuts down
+/// gracefully.
+///
+/// `tokio::signal::ctrl_c()` can be used as the `shutdown` argument. This will
+/// listen for a SIGINT signal.
 pub async fn run(listener: TcpListener, shutdown: impl Future) {
+    // When the provided `shutdown` future completes, we must send a shutdown
+    // message to all active connections. We use a broadcast channel for this
+    // purpose. The call below ignores the receiver of the broadcast pair, and when
+    // a receiver is needed, the subscribe() method on the sender is used to create
+    // one.
     let (notify_shutdown, _) = broadcast::channel(1);
     let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
 
@@ -56,6 +138,24 @@ pub async fn run(listener: TcpListener, shutdown: impl Future) {
         shutdown_complete_tx,
     };
 
+    // Concurrently run the server and listen for the `shutdown` signal. The
+    // server task runs until an error is encountered, so under normal
+    // circumstances, this `select!` statement runs until the `shutdown` signal
+    // is received.
+    //
+    // `select!` statements are written in the form of:
+    //
+    // ```
+    // <result of async op> = <async op> => <step to perform with result>
+    // ```
+    //
+    // All `<async op>` statements are executed concurrently. Once the **first**
+    // op completes, its associated `<step to perform with result>` is
+    // performed.
+    //
+    // The `select!` macro is a foundational building block for writing
+    // asynchronous Rust. See the API docs for more details:
+    //
     tokio::select! {
         res = server.run() => {
             // If an error is received here, accepting connections from the TCP
@@ -96,9 +196,22 @@ pub async fn run(listener: TcpListener, shutdown: impl Future) {
     let _ = shutdown_complete_rx.recv().await;
 }
 
-
 impl Listener {
-
+    /// Run the server
+    ///
+    /// Listen for inbound connections. For each inbound connection, spawn a
+    /// task to process that connection.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if accepting returns an error. This can happen for a
+    /// number reasons that resolve over time. For example, if the underlying
+    /// operating system has reached an internal limit for max number of
+    /// sockets, accept will fail.
+    ///
+    /// The process is not able to detect when a transient error resolves
+    /// itself. One strategy for handling this is to implement a back off
+    /// strategy, which is what we do here.
     async fn run(&mut self) -> crate::Result<()> {
         info!("accepting inbound connections");
 

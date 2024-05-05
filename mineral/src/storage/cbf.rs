@@ -36,6 +36,7 @@ impl Page {
     }
 }
 
+#[derive(Debug)]
 pub struct Cbf {
     version: VersionNo,
     pages: BTreeMap<PageNo, Page>,

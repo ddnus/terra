@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::{BTreeMap, HashMap}, time::{Duration, SystemTime}};
+use std::{collections::{BTreeMap, HashMap}, time::SystemTime};
 
 use crate::error::Error;
 
@@ -6,7 +6,6 @@ use super::{slot::Slot, Bytes};
 
 type PageNo = usize;
 type PageCap = usize;
-type EntryPos = usize;
 type VersionNo = usize;
 
 
@@ -37,6 +36,7 @@ impl Page {
     }
 }
 
+#[derive(Debug)]
 pub struct Cbf {
     version: VersionNo,
     pages: BTreeMap<PageNo, Page>,
@@ -107,6 +107,6 @@ impl Cbf {
         None
     }
 
-    
+
 
 }

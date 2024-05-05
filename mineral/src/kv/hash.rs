@@ -7,7 +7,6 @@ use std::time::{Duration, SystemTime};
 
 use lru::LruCache;
 
-use crate::kv::slot;
 use crate::{config::KvConfig, storage::serve::Serve};
 
 use super::cbf::Cbf;
@@ -16,6 +15,7 @@ use super::wal::{KvWal, KvWalEntry};
 use super::Slot;
 use super::Bytes;
 
+#[derive(Debug)]
 pub struct HashKv {
     store: Arc<Mutex<Serve>>,
     wal: Arc<Mutex<KvWal>>,

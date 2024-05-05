@@ -8,7 +8,7 @@ use std::os::unix::fs::MetadataExt;
 #[cfg(target_os = "windows")]
 use std::os::windows::fs::MetadataExt;
 
-use super::{MetaData, State};
+use super::MetaData;
 
 #[derive(Debug)]
 pub struct Disk {

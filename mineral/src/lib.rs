@@ -1,8 +1,11 @@
 mod state;
 mod error;
-mod config;
+pub mod config;
+pub use config::KvConfig;
+pub use config::StorageConfig;
 mod types;
 mod flate;
 mod cache;
 pub mod storage;
 pub mod kv;
+pub use kv::hash::HashKv;

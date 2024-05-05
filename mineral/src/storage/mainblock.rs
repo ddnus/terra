@@ -7,6 +7,7 @@ use byteorder::{BigEndian, ByteOrder};
 const MAIN_BLOCK_FILE_NAME: &str = "@mainblock";
 const HEADER_SIZE: usize = 17;
 
+#[derive(Debug)]
 pub struct MainBlock {
     path: String,
     
