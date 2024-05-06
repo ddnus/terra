@@ -1,9 +1,10 @@
 
 use std::num::NonZeroUsize;
+use std::ops::Add;
 use std::sync::{Arc, Mutex};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lru::LruCache;
 
@@ -65,14 +66,11 @@ impl HashKv {
 
     pub fn setnx(&mut self, key: &str, val: &Bytes, expire: Option<Duration>) {
         let expires_at = if let Some(dur) = expire {
-            SystemTime::now()
-                .checked_add(dur).unwrap()
-                .elapsed().unwrap()
-                .as_secs()
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().add(dur).as_secs()
         } else {
             0
         };
-
+        
         // 优先写日志
         let version = self.wal.lock().unwrap().set(key, val, expires_at).unwrap();
 
@@ -215,11 +213,11 @@ mod tests {
     fn get_conf() -> KvConfig {
         KvConfig {
             storage: StorageConfig{
-                path: "/tmp/terra/tests/kv-data1".to_string(),
+                path: "/tmp/terra/tests/kv-data2".to_string(),
                 block_size: 1024,
                 page_max_cap: 1024 * 1024 * 50,
             },
-            wal_path: "/tmp/terra/tests/kv-log1".to_string(),
+            wal_path: "/tmp/terra/tests/kv-log2".to_string(),
             cache_cap: 1024 * 1024 * 50,
         }
     }
@@ -237,6 +235,18 @@ mod tests {
         let new_val = kv.get(&key);
         assert!(new_val.is_none());
 
+        kv.setnx(&key, &val, Some(Duration::from_secs(4)));
+        assert_eq!(kv.get(&key).unwrap(), val);
         thread::sleep(Duration::from_secs(5));
+        assert_eq!(kv.get(&key), None);
+    }
+
+    #[test]
+    fn test_duration() {
+        assert_eq!(
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            SystemTime::now().checked_add(Duration::from_secs(4)).unwrap().elapsed().unwrap().as_secs(),
+        );
+        
     }
 }

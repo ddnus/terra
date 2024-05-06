@@ -1,7 +1,7 @@
 use mineral::kv::hash::HashKv;
 use mineral::{KvConfig, StorageConfig};
 use tokio::sync::Notify;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
 use bytes::Bytes;
 use std::sync::{Arc, Mutex};

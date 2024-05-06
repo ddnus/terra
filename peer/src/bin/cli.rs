@@ -9,7 +9,7 @@ use std::time::Duration;
 
 #[derive(Parser, Debug)]
 #[clap(
-    name = "mini-redis-cli",
+    name = "peer-cli",
     version,
     author,
     about = "Issue Redis commands"
