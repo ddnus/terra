@@ -58,6 +58,8 @@ impl Db {
             },
             wal_path: "/tmp/terra/tests/peer/log".to_string(),
             cache_cap: 1024 * 1024 * 50,
+            cbf_cap: 1024 * 1024 * 50,
+            slot_qty: 10000,
         };
 
         let shared = Arc::new(Shared {

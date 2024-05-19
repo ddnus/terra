@@ -210,6 +210,8 @@ impl Wal {
             self.wlog.close();
             
             self.wlog = Wlog::new(&self.path, self.seq);
+
+            self.rotation_time = SystemTime::now();
         }
 
     }
@@ -292,6 +294,7 @@ impl Wal {
 
             if let Ok(_) = Wlog::new(&self.path, version).checked() {
                 checked_list.push(version);
+                self.log_version_list.remove(0);
             }
         }
 

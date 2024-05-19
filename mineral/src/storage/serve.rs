@@ -97,7 +97,6 @@ impl Serve {
     fn init_wait_block(&self) {
         // 初始化检查点后的数据，全部写入缓冲
         let checkpoint = self.mainblock.lock().unwrap().checkpoint();
-        println!("checkpoint: {}", checkpoint);
         
         let wal_reder = self.wal.lock().unwrap().reader(checkpoint, 0);
         if wal_reder.is_none() {

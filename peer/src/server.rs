@@ -111,7 +111,7 @@ struct Handler {
 /// well).
 const MAX_CONNECTIONS: usize = 250;
 
-/// Run the mini-redis server.
+/// Run the peer server.
 ///
 /// Accepts connections from the supplied listener. For each inbound connection,
 /// a task is spawned to handle that connection. The server runs until the
@@ -301,25 +301,12 @@ impl Listener {
 }
 
 impl Handler {
-    /// Process a single connection.
-    ///
-    /// Request frames are read from the socket and processed. Responses are
-    /// written back to the socket.
-    ///
-    /// Currently, pipelining is not implemented. Pipelining is the ability to
-    /// process more than one request concurrently per connection without
-    /// interleaving frames. See for more details:
-    /// https://redis.io/topics/pipelining
-    ///
-    /// When the shutdown signal is received, the connection is processed until
-    /// it reaches a safe state, at which point it is terminated.
+
     #[instrument(skip(self))]
     async fn run(&mut self) -> crate::Result<()> {
-        // As long as the shutdown signal has not been received, try to read a
-        // new request frame.
+        
         while !self.shutdown.is_shutdown() {
-            // While reading a request frame, also listen for the shutdown
-            // signal.
+            
             let maybe_frame = tokio::select! {
                 res = self.connection.read_frame() => res?,
                 _ = self.shutdown.recv() => {
@@ -342,24 +329,8 @@ impl Handler {
             // unsupported command.
             let cmd = Command::from_frame(frame)?;
 
-            // Logs the `cmd` object. The syntax here is a shorthand provided by
-            // the `tracing` crate. It can be thought of as similar to:
-            //
-            // ```
-            // debug!(cmd = format!("{:?}", cmd));
-            // ```
-            //
-            // `tracing` provides structured logging, so information is "logged"
-            // as key-value pairs.
             debug!(?cmd);
 
-            // Perform the work needed to apply the command. This may mutate the
-            // database state as a result.
-            //
-            // The connection is passed into the apply function which allows the
-            // command to write response frames directly to the connection. In
-            // the case of pub/sub, multiple frames may be send back to the
-            // peer.
             cmd.apply(&self.db, &mut self.connection, &mut self.shutdown)
                 .await?;
         }

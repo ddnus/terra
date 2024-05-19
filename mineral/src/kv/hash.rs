@@ -21,7 +21,7 @@ pub struct HashKv {
     store: Arc<Mutex<Serve>>,
     wal: Arc<Mutex<KvWal>>,
     cbf: Arc<Mutex<Cbf>>,
-    slots: usize,
+    slots: u32,
     lru: LruCache<String, SlotEntry>,
 }
 
@@ -30,8 +30,8 @@ impl HashKv {
         let mut kv = HashKv {
             store: Arc::new(Mutex::new(Serve::new(conf.storage.clone()))),
             wal: Arc::new(Mutex::new(KvWal::new(&conf.wal_path))),
-            cbf: Arc::new(Mutex::new(Cbf::new(100))),
-            slots: 1000,
+            cbf: Arc::new(Mutex::new(Cbf::new(conf.cbf_cap))),
+            slots: conf.slot_qty,
             lru: LruCache::new(NonZeroUsize::new(conf.cache_cap).unwrap()),
         };
         
@@ -166,7 +166,6 @@ impl HashKv {
 
     }
 
-
     fn init_wal_logs(&mut self) {
         let wal_reder = self.wal.lock().unwrap().reader(0, 0);
         if wal_reder.is_none() {
@@ -187,19 +186,17 @@ impl HashKv {
         thread::spawn(move || {
             loop {
                 if let Some((page_no, page)) = cbf.lock().unwrap().pop_first_page() {
-                    // println!("page no: {}, entrys: {:?}", page_no, page.entrys);
+                    // println!("page no: {}", page_no);
                     for (pos, buf) in page.entrys {
                         store.lock().unwrap().set(pos, buf).unwrap();
                     }
 
-                    // 此处主要用来处理
+                    // 此处主要用来处理预写日志检查点
                     wal.lock().unwrap().checkpoint(page.max_version as u64);
                 }
-
-                thread::sleep(Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(5000));
             }
         });
-        
     }
 
 }
@@ -219,6 +216,8 @@ mod tests {
             },
             wal_path: "/tmp/terra/tests/kv-log2".to_string(),
             cache_cap: 1024 * 1024 * 50,
+            cbf_cap: 1024 * 1024 * 50,
+            slot_qty: 10000,
         }
     }
 

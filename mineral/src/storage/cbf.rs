@@ -78,6 +78,7 @@ impl Cbf {
                 
                 self.pages.insert(self.active_page.page_no, self.active_page.clone());
                 self.active_page = Page::new(self.version);
+                self.rotation_time = SystemTime::now();
         }
     }
 

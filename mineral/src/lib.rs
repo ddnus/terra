@@ -9,3 +9,4 @@ mod cache;
 pub mod storage;
 pub mod kv;
 pub use kv::hash::HashKv;
+pub mod btree;

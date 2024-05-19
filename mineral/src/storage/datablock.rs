@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::Result;
 use crate::state::disk::Disk;
-use crate::storage::{bitmap::BitMap};
+use crate::storage::bitmap::BitMap;
 use crate::state;
 
 const DATA_BLOCK_FILE_NAME: &str = "@datablock";

@@ -15,4 +15,8 @@ pub struct KvConfig {
     pub wal_path: String,
     // hash lru存储容量
     pub cache_cap: usize,
+    // 变更缓冲容量大小设置
+    pub cbf_cap: usize,
+    // hash槽位数量
+    pub slot_qty: u32,
 }

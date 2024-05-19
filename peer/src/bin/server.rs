@@ -1,4 +1,4 @@
-//! mini-redis server.
+//! peer server.
 //!
 //! This file is the entry point for the server implemented in the library. It
 //! performs command line parsing and passes the arguments on to
