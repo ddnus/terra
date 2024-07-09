@@ -1,0 +1,38 @@
+[package]
+name = "p2p"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+pretty_env_logger.workspace = true
+
+libp2p = { version = "0.53", features = [
+    "tokio", "cbor", "dns", "kad", "noise", "macros", 
+    "request-response", "tcp", "websocket", "yamux", "ping",
+    "identify", "gossipsub",
+] }
+either = "1.8"
+itertools = "0.11"
+async-trait = "0.1"
+void = "1.0"
+bs58 = "0.5"
+unsigned-varint = { version = "0.7", features = [
+    "futures",
+    "asynchronous_codec",
+] }
+clap = { version = "4.5.4", features = ["derive"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "demo"
+path = "examples/main.rs"
+
+[dev-dependencies]
+pretty_env_logger.workspace = true
