@@ -88,7 +88,7 @@ impl Cbf {
             return Some(data.clone());
         }
 
-        for (page_no, page) in self.pages.range(..).rev() {
+        for (_page_no, page) in self.pages.range(..).rev() {
             let opt_data = page.entrys.get(&entry_pos);
             if let Some(data) = opt_data {
                 return Some(data.clone());

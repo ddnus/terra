@@ -1,8 +1,7 @@
 mod state;
 mod error;
 pub mod config;
-pub use config::KvConfig;
-pub use config::StorageConfig;
+pub use config::*;
 mod types;
 mod flate;
 mod cache;

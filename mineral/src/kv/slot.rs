@@ -69,8 +69,8 @@ impl Slot {
         self.slot_kv.remove(key)
     }
 
-    pub fn del_soft(&mut self, key: &str) -> Option<SlotEntry> {
-        let mut data = self.get(key);
+    pub fn _del_soft(&mut self, key: &str) -> Option<SlotEntry> {
+        let _data = self.get(key);
         if let Some(mut entry) = self.get(key) {
             entry.expires_at = EXPIRE_DEL;
             return self.slot_kv.insert(key.to_string(), entry);

@@ -1,4 +1,4 @@
-use crate::{Connection, Frame};
+use crate::{error::Error, Connection, Frame};
 
 use tracing::{debug, instrument};
 
@@ -31,7 +31,7 @@ impl Unknown {
 
         debug!(?response);
 
-        dst.write_frame(&response).await?;
+        dst.write_frame(&response).await.map_err(|err| Error::Response(format!("{:?}", err)))?;
         Ok(())
     }
 }

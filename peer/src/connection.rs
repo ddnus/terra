@@ -1,3 +1,4 @@
+use crate::error::Error;
 use crate::frame::{self, Frame};
 
 use bytes::{Buf, BytesMut};
@@ -74,7 +75,7 @@ impl Connection {
                 if self.buffer.is_empty() {
                     return Ok(None);
                 } else {
-                    return Err("connection reset by peer".into());
+                    return Err(Error::Other("connection reset by peer".into()));
                 }
             }
         }
@@ -85,8 +86,6 @@ impl Connection {
     /// enough data has been buffered yet, `Ok(None)` is returned. If the
     /// buffered data does not represent a valid frame, `Err` is returned.
     fn parse_frame(&mut self) -> crate::Result<Option<Frame>> {
-        use frame::Error::Incomplete;
-
         // Cursor is used to track the "current" location in the
         // buffer. Cursor also implements `Buf` from the `bytes` crate
         // which provides a number of helpful utilities for working
@@ -137,7 +136,7 @@ impl Connection {
             //
             // We do not want to return `Err` from here as this "error" is an
             // expected runtime condition.
-            Err(Incomplete) => Ok(None),
+            Err(Error::Incomplete) => Ok(None),
             // An error was encountered while parsing the frame. The connection
             // is now in an invalid state. Returning `Err` from here will result
             // in the connection being closed.

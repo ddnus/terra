@@ -26,7 +26,7 @@
 //!   representation.
 
 pub mod clients;
-pub use clients::{BlockingClient, BufferedClient, Client};
+pub use clients::{BlockingClient, Client};
 
 pub mod cmd;
 pub use cmd::Command;
@@ -42,32 +42,28 @@ use db::Db;
 use db::DbDropGuard;
 
 mod parse;
-use parse::{Parse, ParseError};
+use parse::Parse;
 
 pub mod server;
+
+pub mod config;
 
 mod shutdown;
 use shutdown::Shutdown;
 
-/// Default port that a redis server listens on.
-///
-/// Used if no port is specified.
-pub const DEFAULT_PORT: u16 = 6379;
+mod error;
+use error::Error;
 
-/// Error returned by most functions.
-///
-/// When writing a real application, one might want to consider a specialized
-/// error handling crate or defining an error type as an `enum` of causes.
-/// However, for our example, using a boxed `std::error::Error` is sufficient.
-///
-/// For performance reasons, boxing is avoided in any hot path. For example, in
-/// `parse`, a custom error `enum` is defined. This is because the error is hit
-/// and handled during normal execution when a partial frame is received on a
-/// socket. `std::error::Error` is implemented for `parse::Error` which allows
-/// it to be converted to `Box<dyn std::error::Error>`.
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+mod p2p;
+pub use p2p::P2pClient;
 
-/// A specialized `Result` type for peer operations.
-///
-/// This is defined as a convenience.
+mod state;
+mod node;
+mod proto;
+// mod schema;
+// mod wallet;
+mod utils;
+
+pub const DEFAULT_PORT: u16 = 6380;
+
 pub type Result<T> = std::result::Result<T, Error>;

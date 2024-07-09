@@ -117,9 +117,9 @@ impl Serve {
         let mainblock = self.mainblock.clone();
         thread::spawn(move || {
             loop {
-                if let Some((page_no, page)) = cbf.lock().unwrap().pop_first_page() {
+                if let Some((_page_no, page)) = cbf.lock().unwrap().pop_first_page() {
                     // println!("page no: {}, entrys: {:?}", page_no, page.entrys);
-                    for (pos, buf) in page.entrys {
+                    for (_pos, buf) in page.entrys {
                         // println!("pos: {}", pos);
                         let block_op = BlockOp::decode(&buf);
                         match block_op {
@@ -132,7 +132,7 @@ impl Serve {
                         }
                     }
 
-                    if let Err(err) = mainblock.lock().unwrap().flush_datablock(page.max_version) {
+                    if let Err(_err) = mainblock.lock().unwrap().flush_datablock(page.max_version) {
                         panic!("flush page error");
                     }
                 }

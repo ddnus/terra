@@ -304,9 +304,9 @@ impl Wal {
     fn truncate_all(&mut self) {
         for version in self.log_version_list.clone() {
             if self.wlog.version == version {
-                self.wlog.delete();
+                let _ = self.wlog.delete();
             } else {
-                Wlog::new(&self.path, version).delete();
+                let _ = Wlog::new(&self.path, version).delete();
             }
         }
 
@@ -342,7 +342,7 @@ impl WalReader {
                 continue;
             }
 
-            let mut wlog = Wlog::new(&wal.path, version);
+            let wlog = Wlog::new(&wal.path, version);
 
             wal_reader = Some(WalReader{
                 path: wal.path.to_string(),
@@ -377,7 +377,7 @@ impl Iterator for WalReader {
                     return None;
                 }
     
-                let mut wlog = Wlog::new(&self.path, version);
+                let wlog = Wlog::new(&self.path, version);
                 self.wlog_reader = PageReader::new(wlog);
                 self.wlog_version = version;
                 return self.next();

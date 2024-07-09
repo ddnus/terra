@@ -8,6 +8,8 @@ use std::io::Cursor;
 use std::num::TryFromIntError;
 use std::string::FromUtf8Error;
 
+use crate::error::Error;
+
 /// A frame in the Redis protocol.
 #[derive(Clone, Debug)]
 pub enum Frame {
@@ -17,15 +19,6 @@ pub enum Frame {
     Bulk(Bytes),
     Null,
     Array(Vec<Frame>),
-}
-
-#[derive(Debug)]
-pub enum Error {
-    /// Not enough data is available to parse a message
-    Incomplete,
-
-    /// Invalid message encoding
-    Other(crate::Error),
 }
 
 impl Frame {
@@ -48,6 +41,15 @@ impl Frame {
         }
     }
 
+    pub(crate) fn push_string(&mut self, s: String) {
+        match self {
+            Frame::Array(vec) => {
+                vec.push(Frame::Simple(s));
+            }
+            _ => panic!("not an array frame"),
+        }
+    }
+
     /// Push an "integer" frame into the array. `self` must be an Array frame.
     ///
     /// # Panics
@@ -58,6 +60,22 @@ impl Frame {
             Frame::Array(vec) => {
                 vec.push(Frame::Integer(value));
             }
+            _ => panic!("not an array frame"),
+        }
+    }
+
+    pub(crate) fn merge_frame(&mut self, frame: Frame) {
+        match frame {
+            Frame::Array(other_vec) => {
+                match self {
+                    Frame::Array(vec) => {
+                        for frm in other_vec {
+                            vec.push(frm);
+                        }
+                    }
+                    _ => panic!("not an array frame"),
+                }
+            },
             _ => panic!("not an array frame"),
         }
     }
@@ -287,16 +305,5 @@ impl From<FromUtf8Error> for Error {
 impl From<TryFromIntError> for Error {
     fn from(_src: TryFromIntError) -> Error {
         "protocol error; invalid frame format".into()
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl fmt::Display for Error {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::Incomplete => "stream ended early".fmt(fmt),
-            Error::Other(err) => err.fmt(fmt),
-        }
     }
 }

@@ -37,7 +37,6 @@ enum Command {
         /// Name of key to get
         key: String,
     },
-    /// Set key to hold the string value.
     Set {
         /// Name of key to set
         key: String,
@@ -50,22 +49,20 @@ enum Command {
         #[clap(value_parser = duration_from_ms_str)]
         expires: Option<Duration>,
     },
+    Peer {
+        // Node subcommand
+        #[clap(subcommand)]
+        command: PeerCommand,
+    }
 }
 
-/// Entry point for CLI tool.
-///
-/// The `[tokio::main]` annotation signals that the Tokio runtime should be
-/// started when the function is called. The body of the function is executed
-/// within the newly spawned runtime.
-///
-/// `flavor = "current_thread"` is used here to avoid spawning background
-/// threads. The CLI tool use case benefits more by being lighter instead of
-/// multi-threaded.
+#[derive(Subcommand, Debug)]
+enum PeerCommand {
+    Basic,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> peer::Result<()> {
-    // Enable logging
-    tracing_subscriber::fmt::try_init()?;
-
     // Parse command line arguments
     let cli = Cli::parse();
 
@@ -111,6 +108,23 @@ async fn main() -> peer::Result<()> {
         } => {
             client.set_expires(&key, value, expires).await?;
             println!("OK");
+        }
+        Command::Peer {
+            command,
+        } => {
+            match command {
+                PeerCommand::Basic => {
+                    if let Some(value) = client.peer_basic().await? {
+                        if let Ok(string) = str::from_utf8(&value) {
+                            println!("\"{}\"", string);
+                        } else {
+                            println!("{:?}", value);
+                        }
+                    } else {
+                        println!("(nil)");
+                    }
+                }
+            }
         }
     }
 

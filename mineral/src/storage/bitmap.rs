@@ -92,7 +92,7 @@ impl BlockMeta {
 
     fn find_idle(&mut self, len: usize) -> Option<usize> {
         let mut find_index: Option<usize> = None;
-        let mut min_len = 0;
+        let min_len = 0;
         for (key, val) in self.idles.iter() {
             if (min_len > *val || min_len == 0) && *val >= len {
                 find_index = Some(*key)

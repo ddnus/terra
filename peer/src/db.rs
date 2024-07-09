@@ -6,13 +6,15 @@ use tokio::time::Duration;
 use bytes::Bytes;
 use std::sync::{Arc, Mutex};
 
-#[derive(Debug)]
-pub(crate) struct DbDropGuard {
+use crate::config::Config;
+
+#[derive(Debug, Clone)]
+pub struct DbDropGuard {
     db: Db,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Db {
+pub struct Db {
     shared: Arc<Shared>,
 }
 
@@ -33,11 +35,11 @@ struct State {
 
 impl DbDropGuard {
 
-    pub(crate) fn new() -> DbDropGuard {
-        DbDropGuard { db: Db::new() }
+    pub fn new(config: Config) -> DbDropGuard {
+        DbDropGuard { db: Db::new(config) }
     }
 
-    pub(crate) fn db(&self) -> Db {
+    pub fn db(&self) -> Db {
         self.db.clone()
     }
 }
@@ -49,14 +51,14 @@ impl Drop for DbDropGuard {
 }
 
 impl Db {
-    pub(crate) fn new() -> Db {
+    pub fn new(config: Config) -> Db {
         let conf = KvConfig {
             storage: StorageConfig {
-                path: "/tmp/terra/tests/peer/data".to_string(),
+                path: config.data_dir.clone() + "data",
                 block_size: 1024,
                 page_max_cap: 1024 * 1024 * 50,
             },
-            wal_path: "/tmp/terra/tests/peer/log".to_string(),
+            wal_path: config.data_dir.clone() + "log",
             cache_cap: 1024 * 1024 * 50,
             cbf_cap: 1024 * 1024 * 50,
             slot_qty: 10000,
@@ -73,12 +75,12 @@ impl Db {
         Db { shared }
     }
 
-    pub(crate) fn get(&self, key: &str) -> Option<Bytes> {
+    pub fn get(&self, key: &str) -> Option<Bytes> {
         let mut state = self.shared.state.lock().unwrap();
         state.kv.get(key).map(|data| Bytes::from(data))
     }
 
-    pub(crate) fn set(&self, key: String, value: Bytes, expire: Option<Duration>) {
+    pub fn set(&self, key: String, value: Bytes, expire: Option<Duration>) {
         let mut state = self.shared.state.lock().unwrap();
 
         state.kv.setnx(&key, &value.to_vec(), expire);

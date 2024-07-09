@@ -1,4 +1,4 @@
-use crate::{Connection, Frame, Parse, ParseError};
+use crate::{error::Error, Connection, Frame, Parse};
 use bytes::Bytes;
 use tracing::{debug, instrument};
 
@@ -19,30 +19,10 @@ impl Ping {
         Ping { msg }
     }
 
-    /// Parse a `Ping` instance from a received frame.
-    ///
-    /// The `Parse` argument provides a cursor-like API to read fields from the
-    /// `Frame`. At this point, the entire frame has already been received from
-    /// the socket.
-    ///
-    /// The `PING` string has already been consumed.
-    ///
-    /// # Returns
-    ///
-    /// Returns the `Ping` value on success. If the frame is malformed, `Err` is
-    /// returned.
-    ///
-    /// # Format
-    ///
-    /// Expects an array frame containing `PING` and an optional message.
-    ///
-    /// ```text
-    /// PING [message]
-    /// ```
     pub(crate) fn parse_frames(parse: &mut Parse) -> crate::Result<Ping> {
         match parse.next_bytes() {
             Ok(msg) => Ok(Ping::new(Some(msg))),
-            Err(ParseError::EndOfStream) => Ok(Ping::default()),
+            Err(Error::EndOfStream) => Ok(Ping::default()),
             Err(e) => Err(e.into()),
         }
     }
@@ -61,7 +41,7 @@ impl Ping {
         debug!(?response);
 
         // Write the response back to the client
-        dst.write_frame(&response).await?;
+        dst.write_frame(&response).await.map_err(|err| Error::Response(format!("{:?}", err)))?;
 
         Ok(())
     }

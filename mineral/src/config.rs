@@ -1,5 +1,7 @@
+use serde::Deserialize;
 
-#[derive(Clone, Debug, Default)]
+
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct StorageConfig {
     // 数据文件存储路径
     pub path: String,
@@ -9,7 +11,7 @@ pub struct StorageConfig {
     pub page_max_cap: usize,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct KvConfig {
     pub storage: StorageConfig,
     pub wal_path: String,
