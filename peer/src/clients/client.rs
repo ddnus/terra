@@ -85,7 +85,7 @@ impl Client {
     }
 
     #[instrument(skip(self))]
-    pub async fn get(&mut self, key: &str) -> crate::Result<Option<Bytes>> {
+    pub async fn get(&mut self, key: Bytes) -> crate::Result<Option<Bytes>> {
         // Create a `Get` command for the `key` and convert it to a frame.
         let frame = Get::new(key).into_frame();
 
@@ -102,14 +102,14 @@ impl Client {
     }
 
     #[instrument(skip(self))]
-    pub async fn set(&mut self, key: &str, value: Bytes) -> crate::Result<()> {
+    pub async fn set(&mut self, key: Bytes, value: Bytes) -> crate::Result<()> {
         self.set_cmd(Set::new(key, value, None)).await
     }
 
     #[instrument(skip(self))]
     pub async fn set_expires(
         &mut self,
-        key: &str,
+        key: Bytes,
         value: Bytes,
         expiration: Duration,
     ) -> crate::Result<()> {

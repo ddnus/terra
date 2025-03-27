@@ -22,7 +22,7 @@ pub struct HashKv {
     wal: Arc<Mutex<KvWal>>,
     cbf: Arc<Mutex<Cbf>>,
     slots: u32,
-    lru: LruCache<String, SlotEntry>,
+    lru: LruCache<Bytes, SlotEntry>,
 }
 
 impl HashKv {
@@ -60,11 +60,11 @@ impl HashKv {
         index as usize
     }
 
-    pub fn set(&mut self, key: &str, val: &Bytes) {
+    pub fn set(&mut self, key: &Bytes, val: &Bytes) {
         self.setnx(key, val, None);
     }
 
-    pub fn setnx(&mut self, key: &str, val: &Bytes, expire: Option<Duration>) {
+    pub fn setnx(&mut self, key: &Bytes, val: &Bytes, expire: Option<Duration>) {
         let expires_at = if let Some(dur) = expire {
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap().add(dur).as_secs()
         } else {
@@ -78,7 +78,7 @@ impl HashKv {
 
     }
 
-    fn _set_to_cbf(&mut self, version: u64, key: &str, val: &Bytes, expires_at: u64) {
+    fn _set_to_cbf(&mut self, version: u64, key: &Bytes, val: &Bytes, expires_at: u64) {
         let slot_no = self.calculate_index(&key);
 
         let mut slot = if let Some(st) = self.cbf.lock().unwrap().get(slot_no) {
@@ -96,10 +96,10 @@ impl HashKv {
         self.cbf.lock().unwrap().insert(version as usize, &slot).unwrap();
 
         // 更新lru
-        self.lru.put(key.to_string(), SlotEntry::new(val, expires_at));
+        self.lru.put(key.clone(), SlotEntry::new(val, expires_at));
     }
 
-    pub fn get(&mut self, key: &str) -> Option<Bytes> {
+    pub fn get(&mut self, key: &Bytes) -> Option<Bytes> {
 
         let slot_no = self.calculate_index(&key);
         // 从lru中获取
@@ -128,7 +128,7 @@ impl HashKv {
                     return None;
                 }
                 // 将entry更新至lru
-                self.lru.put(key.to_string(), entry.clone());
+                self.lru.put(key.clone(), entry.clone());
                 return Some(entry.value);
             }
         }
@@ -136,7 +136,7 @@ impl HashKv {
         None
     }
 
-    pub fn del(&mut self, key: &str) -> Option<Bytes> {
+    pub fn del(&mut self, key: &Bytes) -> Option<Bytes> {
 
         let version = self.wal.lock().unwrap().del(key).unwrap();
 
@@ -157,7 +157,7 @@ impl HashKv {
         self.cbf.lock().unwrap().insert(version as usize, &slot).unwrap();
 
         // 更新lru
-        self.lru.put(key.to_string(), SlotEntry::new(&vec![], EXPIRE_DEL));
+        self.lru.put(key.clone(), SlotEntry::new(&vec![], EXPIRE_DEL));
         
         match old_slot_entry {
             Some(old_entry) => Some(old_entry.value),
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn test_set() {
         let mut kv = HashKv::new(get_conf());
-        let key = "foo";
+        let key = "foo".as_bytes().to_vec();
         let val = "bar".as_bytes().to_vec();
         kv.set(&key, &val);
         assert_eq!(kv.get(&key).unwrap(), val);

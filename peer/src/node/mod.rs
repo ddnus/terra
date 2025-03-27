@@ -45,7 +45,7 @@ impl Node {
         self.db_holder.db()
     }
 
-    pub(crate) fn get(&self, key: &str) -> Option<Bytes> {
+    pub(crate) fn get(&self, key: &Bytes) -> Option<Bytes> {
         self.db().get(key)
     }
 
@@ -53,7 +53,7 @@ impl Node {
     //     self.p2p.get_node_status()
     // }
 
-    pub(crate) fn set(&self, key: String, value: Bytes, expire: Option<Duration>) {
+    pub(crate) fn set(&self, key: Bytes, value: Bytes, expire: Option<Duration>) {
         self.db().set(key, value, expire)
     }
 
@@ -70,9 +70,9 @@ impl Node {
         }
     }
 
-    pub async fn get_closet_peer(&self, key: String) -> Option<PeerIdWithMultiaddr> {
-        let addr: PeerIdWithMultiaddr = "/ip".parse().unwrap();
-    }
+    // pub async fn get_closet_peer(&self, key: String) -> Option<PeerIdWithMultiaddr> {
+    //     let addr: PeerIdWithMultiaddr = "/ip".parse().unwrap();
+    // }
 
     // pub fn transfer(&self, from: &str, to: &str, value: u64, nonce: u64) -> Result<(), Error> {
     //     let tx = Tx::new(from, to, value, nonce);

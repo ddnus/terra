@@ -98,7 +98,7 @@ impl BlockingClient {
     ///     println!("Got = {:?}", val);
     /// }
     /// ```
-    pub fn get(&mut self, key: &str) -> crate::Result<Option<Bytes>> {
+    pub fn get(&mut self, key: Bytes) -> crate::Result<Option<Bytes>> {
         self.rt.block_on(self.inner.get(key))
     }
 
@@ -127,7 +127,7 @@ impl BlockingClient {
     ///     assert_eq!(val, "bar");
     /// }
     /// ```
-    pub fn set(&mut self, key: &str, value: Bytes) -> crate::Result<()> {
+    pub fn set(&mut self, key: Bytes, value: Bytes) -> crate::Result<()> {
         self.rt.block_on(self.inner.set(key, value))
     }
 
@@ -172,7 +172,7 @@ impl BlockingClient {
     /// ```
     pub fn set_expires(
         &mut self,
-        key: &str,
+        key: Bytes,
         value: Bytes,
         expiration: Duration,
     ) -> crate::Result<()> {

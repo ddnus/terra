@@ -75,15 +75,15 @@ impl Db {
         Db { shared }
     }
 
-    pub fn get(&self, key: &str) -> Option<Bytes> {
+    pub fn get(&self, key: &Bytes) -> Option<Bytes> {
         let mut state = self.shared.state.lock().unwrap();
-        state.kv.get(key).map(|data| Bytes::from(data))
+        state.kv.get(&key.to_vec()).map(|data| Bytes::from(data))
     }
 
-    pub fn set(&self, key: String, value: Bytes, expire: Option<Duration>) {
+    pub fn set(&self, key: Bytes, value: Bytes, expire: Option<Duration>) {
         let mut state = self.shared.state.lock().unwrap();
 
-        state.kv.setnx(&key, &value.to_vec(), expire);
+        state.kv.setnx(&key.to_vec(), &value.to_vec(), expire);
     }
 
     /// Signals the purge background task to shut down. This is called by the

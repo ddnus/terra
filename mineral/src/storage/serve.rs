@@ -98,12 +98,12 @@ impl Serve {
         // 初始化检查点后的数据，全部写入缓冲
         let checkpoint = self.mainblock.lock().unwrap().checkpoint();
         
-        let wal_reder = self.wal.lock().unwrap().reader(checkpoint, 0);
-        if wal_reder.is_none() {
+        let wal_reader = self.wal.lock().unwrap().reader(checkpoint, 0);
+        if wal_reader.is_none() {
             return;
         }
 
-        for s in wal_reder.unwrap() {
+        for s in wal_reader.unwrap() {
             let payload = s.unwrap();
             let block_op = BlockOp::decode(&payload.data);
             self.cbf.lock().unwrap().insert(payload.version as usize, 
@@ -147,7 +147,7 @@ impl Serve {
 
 #[cfg(test)]
 mod tests {
-    use std::vec;
+    use std::{time::Instant, vec};
 
     use rand::Rng;
 
@@ -164,24 +164,33 @@ mod tests {
     #[test]
     fn set_test() {
         let conf = get_conf();
+        let start = Instant::now();
         let mut serve = Serve::new(conf);
-
+        println!("server init 耗时: {:?}", start.elapsed());
+        let start = Instant::now();
         let mut list: Vec<(usize, Vec<u8>)> = vec![];
-        for i in 100..500 {
-            let secret_number = rand::thread_rng().gen_range(0..100);
-            list.push((i as usize, vec![(i + 1) as u8; secret_number]));
+        for i in 0..10000 {
+            // let secret_number = rand::thread_rng().gen_range(0..100);
+            list.push((i as usize, vec![i as u8; 10]));
         }
-
+        println!("list.push 耗时: {:?}", start.elapsed());
+        
+        let start = Instant::now();
         for item in list.clone() {
             serve.set(item.0, item.1);
         }
+        println!("写入耗时: {:?}", start.elapsed());
 
+        let start = Instant::now();
         for item in list {
             let res = serve.get(item.0).unwrap();
-            assert_eq!(res, item.1);
+            // println!("{:?}", res)
+            assert_eq!(item.1, res)
         }
+
+        println!("代码块耗时: {:?}", start.elapsed());
         
-        thread::sleep(Duration::from_millis(7000));
+        // thread::sleep(Duration::from_millis(7000));
     }
 
     #[test]

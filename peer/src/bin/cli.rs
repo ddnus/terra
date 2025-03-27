@@ -35,11 +35,11 @@ enum Command {
     /// Get the value of key.
     Get {
         /// Name of key to get
-        key: String,
+        key: Bytes,
     },
     Set {
         /// Name of key to set
-        key: String,
+        key: Bytes,
 
         /// Value to set.
         #[clap(value_parser = bytes_from_str)]
@@ -83,7 +83,7 @@ async fn main() -> peer::Result<()> {
             }
         }
         Command::Get { key } => {
-            if let Some(value) = client.get(&key).await? {
+            if let Some(value) = client.get(key).await? {
                 if let Ok(string) = str::from_utf8(&value) {
                     println!("\"{}\"", string);
                 } else {
@@ -98,7 +98,7 @@ async fn main() -> peer::Result<()> {
             value,
             expires: None,
         } => {
-            client.set(&key, value).await?;
+            client.set(key, value).await?;
             println!("OK");
         }
         Command::Set {
@@ -106,7 +106,7 @@ async fn main() -> peer::Result<()> {
             value,
             expires: Some(expires),
         } => {
-            client.set_expires(&key, value, expires).await?;
+            client.set_expires(key, value, expires).await?;
             println!("OK");
         }
         Command::Peer {

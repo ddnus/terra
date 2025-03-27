@@ -31,7 +31,7 @@ impl SlotEntry {
 #[derive(Debug, Clone)]
 pub struct Slot {
     pub slot_no: usize,
-    pub slot_kv: HashMap<String, SlotEntry>
+    pub slot_kv: HashMap<Bytes, SlotEntry>
 }
 
 impl Slot {
@@ -56,24 +56,24 @@ impl Slot {
         Ok(slot)
     }
     
-    pub fn get(&self, key: &str) -> Option<SlotEntry> {
+    pub fn get(&self, key: &Bytes) -> Option<SlotEntry> {
         self.slot_kv.get(key).map(|bytes| bytes.clone())
     }
 
-    pub fn set(&mut self, key: &str, val: &Bytes, expire: u64) -> Option<SlotEntry> {
+    pub fn set(&mut self, key: &Bytes, val: &Bytes, expire: u64) -> Option<SlotEntry> {
         let entry = SlotEntry::new(val, expire);
-        self.slot_kv.insert(key.to_string(), entry)
+        self.slot_kv.insert(key.to_vec(), entry)
     }
 
-    pub fn del(&mut self, key: &str) -> Option<SlotEntry> {
+    pub fn del(&mut self, key: &Bytes) -> Option<SlotEntry> {
         self.slot_kv.remove(key)
     }
 
-    pub fn _del_soft(&mut self, key: &str) -> Option<SlotEntry> {
+    pub fn _del_soft(&mut self, key: &Bytes) -> Option<SlotEntry> {
         let _data = self.get(key);
         if let Some(mut entry) = self.get(key) {
             entry.expires_at = EXPIRE_DEL;
-            return self.slot_kv.insert(key.to_string(), entry);
+            return self.slot_kv.insert(key.clone(), entry);
         }
         None
     }
@@ -136,7 +136,7 @@ impl Slot {
 
             let key_len = u32::from_be_bytes(new_buf[16..20].try_into().unwrap());
             let key_end = (20 + key_len) as usize;
-            let key = String::from_utf8(new_buf[20..key_end].to_vec()).unwrap();
+            let key = new_buf[20..key_end].to_vec();
             let slot = SlotEntry::new(&new_buf[key_end..].to_vec(), expires_at);
 
             self.slot_kv.insert(key, slot);
@@ -186,15 +186,14 @@ impl Slot {
             if val.has_expired() {
                 continue;
             }
-            let key_bits = key.as_bytes();
-            let key_len = key_bits.len() as u32;
+            let key_len = key.len() as u32;
             let total_len = (key_len as usize + val.value.len() + 20) as u64;
 
             // 开始组装buf
             buf.append(total_len.to_be_bytes().to_vec().as_mut());
             buf.append(val.expires_at.to_be_bytes().to_vec().as_mut());
             buf.append(key_len.to_be_bytes().to_vec().as_mut());
-            buf.append(key_bits.to_vec().as_mut());
+            buf.append(key.to_vec().as_mut());
             buf.append(val.value.as_mut());
         }
 

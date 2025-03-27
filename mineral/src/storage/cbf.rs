@@ -71,6 +71,7 @@ impl Cbf {
         Ok(())
     }
 
+    // rotation_page 将
     pub fn rotation_page(&mut self, buf_len: usize) {
         if self.active_page.cap + buf_len > self.page_max_cap  || 
             (self.rotation_live_time > 0 &&

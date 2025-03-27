@@ -8,19 +8,19 @@ pub struct KvWalEntryHeader {
 }
 
 pub struct KvWalEntry {
-    pub key: String,
+    pub key: Bytes,
     pub val: Bytes,
     pub header: KvWalEntryHeader,
 }
 
 impl KvWalEntry {
-    fn new(op: u8, key: &str, val: &Bytes, expires_at: u64) -> Self {
+    fn new(op: u8, key: &Bytes, val: &Bytes, expires_at: u64) -> Self {
         KvWalEntry {
             header: KvWalEntryHeader{
                 keylen: key.len() as u32,
                 expires_at,
             },
-            key: key.to_string(),
+            key: key.clone(),
             val: val.clone()
         }
     }
@@ -28,7 +28,7 @@ impl KvWalEntry {
     fn encode(&mut self) -> Bytes {
         let mut buf = self.header.expires_at.to_be_bytes().to_vec();
         buf.append(self.header.keylen.to_be_bytes().to_vec().as_mut());
-        buf.append(self.key.as_bytes().to_vec().as_mut());
+        buf.append(self.key.to_vec().as_mut());
         buf.append(self.val.as_mut());
         buf
     }
@@ -37,7 +37,7 @@ impl KvWalEntry {
         let expires_at = u64::from_be_bytes(buf[0..8].try_into().unwrap());
         let keylen = u32::from_be_bytes(buf[8..12].try_into().unwrap());
         let key_end = (keylen + 12) as usize;
-        let key = String::from_utf8(buf[12..key_end].to_vec()).unwrap();
+        let key = buf[12..key_end].to_vec();
         let val = buf[key_end..].to_vec();
         KvWalEntry {
             header: KvWalEntryHeader{
@@ -63,11 +63,11 @@ impl KvWal {
         }
     }
 
-    pub fn set(&mut self, key: &str, val: &Bytes, expire: u64) -> Result<u64, Error> {
+    pub fn set(&mut self, key: &Bytes, val: &Bytes, expire: u64) -> Result<u64, Error> {
         self.append(OP_SET, key, val, expire)
     }
 
-    pub fn del(&mut self, key: &str) -> Result<u64, Error> {
+    pub fn del(&mut self, key: &Bytes) -> Result<u64, Error> {
         self.append(OP_DEL, key, &vec![], 0)
     }
 
@@ -79,7 +79,7 @@ impl KvWal {
         self.wal.reader(min_version, max_version)
     }
 
-    fn append(&mut self, op: u8, key: &str, val: &Bytes, expire: u64) -> Result<u64, Error> {
+    fn append(&mut self, op: u8, key: &Bytes, val: &Bytes, expire: u64) -> Result<u64, Error> {
 
         let mut entry = KvWalEntry::new(op, key, val, expire);
         
